@@ -6,6 +6,8 @@ import react from "@vitejs/plugin-react"; // Plugin para soporte de React.
 import tailwindcss from "@tailwindcss/vite"; // Plugin para Tailwind v4 (integra estilos en build).
 
 export default defineConfig({
+  base: "/", // ← IMPORTANTE para Vercel
+
   plugins: [
     react(), // Activa soporte para JSX y React.
     tailwindcss(), // Integra Tailwind automáticamente (no necesita PostCSS extra).
