@@ -1,0 +1,110 @@
+/* src/index.css */
+/* Importa Tailwind v4 directamente. No necesita las directivas @tailwind base/components/utilities como en v3. */
+
+@import "tailwindcss"; /* Esto activa todas las utilidades de Tailwind. */
+
+/* Estilos globales personalizados. */
+@layer base {
+  :root {
+    /* Variables CSS personalizadas si las necesitas. */
+    --bg-color: #f3f4f6; /* Ejemplo. */
+  }
+}
+
+body {
+  background: #f8f6f6;
+}
+
+body {
+  margin: 0;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu",
+    "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--bg-color); /* Usa variable para fondo. */
+}
+
+code {
+  font-family:
+    source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
+/* Agrega más estilos globales aquí si es necesario. */
+/* animación corazón grande */
+
+@keyframes heartPop {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+
+  50% {
+    transform: scale(1.3);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+.animate-heartPop {
+  animation: heartPop 0.8s ease;
+}
+
+/* corazón pequeño */
+
+@keyframes heartSmall {
+  0% {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+.animate-heartSmall {
+  animation: heartSmall 0.5s ease;
+}
+
+/* borde premium */
+
+.premium-glow {
+  position: relative;
+}
+
+.premium-glow::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+
+  border-radius: 16px;
+
+  background: linear-gradient(120deg, gold, #ffd700, #fff4b0, gold);
+
+  background-size: 200% 200%;
+
+  animation: premiumShine 4s linear infinite;
+
+  z-index: -1;
+}
+
+@keyframes premiumShine {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  100% {
+    background-position: 200% 50%;
+  }
+}
