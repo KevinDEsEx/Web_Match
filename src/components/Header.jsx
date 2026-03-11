@@ -1,5 +1,5 @@
 import { useLocation } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 export default function Header() {
   const location = useLocation();
@@ -9,8 +9,12 @@ export default function Header() {
     setMode(0);
   }, [location.pathname]);
 
-  const exploreModes = ["grid_view", "favorite", "view_agenda"];
-  const simpleModes = ["grid_view", "view_agenda"];
+  const exploreModes = useMemo(
+    () => ["grid_view", "favorite", "view_agenda"],
+    [],
+  );
+
+  const simpleModes = useMemo(() => ["grid_view", "view_agenda"], []);
 
   function nextMode() {
     let next;
@@ -29,12 +33,12 @@ export default function Header() {
   function getNextIcon() {
     if (location.pathname === "/") {
       return exploreModes[mode];
-    } else {
-      return simpleModes[mode];
     }
+
+    return simpleModes[mode];
   }
 
-  function getTitle() {
+  const title = useMemo(() => {
     switch (location.pathname) {
       case "/":
         return "Explorar";
@@ -42,25 +46,25 @@ export default function Header() {
         return "Intereses";
       case "/matches":
         return "Matches";
-      case "/profile":
-        return "Perfil";
       default:
         return "";
     }
-  }
+  }, [location.pathname]);
 
   if (location.pathname === "/profile") return null;
 
   return (
     <header className="sticky top-0 z-40 bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow">
       <div className="max-w-md mx-auto flex items-center justify-between px-4 py-3">
-        <h1 className="text-lg font-bold">{getTitle()}</h1>
+        <h1 className="text-lg font-bold tracking-wide">{title}</h1>
 
         <button
           onClick={nextMode}
-          className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center hover:scale-110 transition"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 transition active:scale-90"
         >
-          <span className="material-symbols-outlined">{getNextIcon()}</span>
+          <span className="material-symbols-outlined text-[22px]">
+            {getNextIcon()}
+          </span>
         </button>
       </div>
     </header>

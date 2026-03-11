@@ -6,9 +6,9 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
   const [smallHeart, setSmallHeart] = useState(false);
   const [bigHeart, setBigHeart] = useState(false);
 
-  const image =
-    user.photo ||
-    "https://images.unsplash.com/photo-1503023345310-bd7c1de61c7d";
+  const image = user.photo
+    ? `${user.photo}?width=500&quality=70`
+    : "https://images.unsplash.com/photo-1503023345310-bd7c1de61c7d?w=500&q=70";
 
   const description =
     user.description?.trim() ||
@@ -20,7 +20,6 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
     const now = Date.now();
     const diff = now - lastTap.current;
 
-    // doble tap
     if (diff < 300) {
       onLike(user.id);
 
@@ -37,19 +36,21 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
   return (
     <div
       onClick={handleTap}
-      className={`relative overflow-hidden rounded-2xl shadow-lg transition duration-300 hover:scale-[1.02]
+      className={`animate-fadeIn relative overflow-hidden rounded-2xl shadow-lg transition duration-300 active:scale-[0.98]
       ${user.premium ? "border-2 border-yellow-400 premium-glow" : ""}`}
     >
-      {/* FOTO */}
-      <div
-        className={`${grid ? "aspect-square" : "aspect-[3/4]"} bg-cover bg-center`}
-        style={{ backgroundImage: `url(${image})` }}
-      />
+      <div className={`${grid ? "aspect-square" : "aspect-[3/4]"} relative`}>
+        <img
+          src={image}
+          loading="lazy"
+          decoding="async"
+          alt={user.name}
+          className="w-full h-full object-cover"
+        />
+      </div>
 
-      {/* OVERLAY */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
 
-      {/* CORAZÓN GRANDE */}
       {bigHeart && (
         <div className="absolute inset-0 flex items-center justify-center animate-heartPop pointer-events-none">
           <span className="material-symbols-outlined text-pink-500 text-8xl drop-shadow-lg">
@@ -58,7 +59,6 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
         </div>
       )}
 
-      {/* CORAZÓN PEQUEÑO */}
       {smallHeart && (
         <div className="absolute inset-0 flex items-center justify-center animate-heartSmall pointer-events-none">
           <span className="material-symbols-outlined text-pink-400 text-4xl">
@@ -67,7 +67,6 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
         </div>
       )}
 
-      {/* INFO */}
       <div className="absolute bottom-0 left-0 right-0 p-3 text-white">
         <h2 className="font-bold text-sm sm:text-base leading-tight">
           {user.name}, {user.age}
@@ -80,7 +79,6 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
         )}
       </div>
 
-      {/* BOTÓN LIKE */}
       {!isMe && (
         <button
           onClick={(e) => {
@@ -99,14 +97,12 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
         </button>
       )}
 
-      {/* ETIQUETA PREMIUM */}
       {user.premium && (
         <div className="absolute top-2 left-2 bg-yellow-400 text-black px-2 py-1 text-xs font-bold rounded shadow">
           ✨ VIP
         </div>
       )}
 
-      {/* ETIQUETA TU */}
       {isMe && (
         <div className="absolute top-2 right-2 bg-blue-500 text-white px-2 py-1 text-xs font-bold rounded">
           Eres tú

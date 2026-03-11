@@ -108,3 +108,26 @@ code {
     background-position: 200% 50%;
   }
 }
+
+img {
+  content-visibility: auto;
+}
+
+.material-symbols-outlined {
+  font-display: swap;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.35s ease;
+}

@@ -3,7 +3,8 @@ import { supabase } from "../services/supabase";
 import UserCard from "../components/UserCard";
 import SwipeCard from "../components/SwipeCard";
 
-const PAGE_SIZE = 6;
+const PAGE_SIZE = 12;
+const CACHE_KEY = "explore_profiles";
 
 export default function Explore({ user }) {
   const [profiles, setProfiles] = useState([]);
@@ -11,10 +12,12 @@ export default function Explore({ user }) {
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState(0);
-
   const [swipeIndex, setSwipeIndex] = useState(0);
 
   const loader = useRef(null);
+  const loadingRef = useRef(false);
+
+  /* -------- CAMBIO DE MODO -------- */
 
   useEffect(() => {
     function handleMode(e) {
@@ -27,25 +30,70 @@ export default function Explore({ user }) {
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
+  /* -------- CACHE LOCAL -------- */
+
+  useEffect(() => {
+    const cached = sessionStorage.getItem(CACHE_KEY);
+
+    if (cached) {
+      const parsed = JSON.parse(cached);
+
+      setProfiles(parsed);
+
+      if (parsed.length >= PAGE_SIZE) {
+        setPage(Math.floor(parsed.length / PAGE_SIZE));
+      }
+    }
+  }, []);
+
+  /* -------- CARGAR LIKES -------- */
+
   useEffect(() => {
     loadLikes();
   }, []);
+
+  /* -------- PAGINACIÓN -------- */
 
   useEffect(() => {
     loadProfiles();
   }, [page]);
 
+  /* -------- SCROLL INFINITO -------- */
+
   useEffect(() => {
     if (mode === 2) return;
 
-    const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && !loading) {
-        setPage((p) => p + 1);
-      }
-    });
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loadingRef.current) {
+          setPage((p) => p + 1);
+        }
+      },
 
-    if (loader.current) observer.observe(loader.current);
-  }, [loading, mode]);
+      { rootMargin: "1200px" },
+    );
+
+    const current = loader.current;
+
+    if (current) observer.observe(current);
+
+    return () => {
+      if (current) observer.unobserve(current);
+    };
+  }, [mode]);
+
+  /* -------- PRECARGA IMÁGENES -------- */
+
+  function preloadImages(list) {
+    list.slice(0, 6).forEach((p) => {
+      if (!p.photo) return;
+
+      const img = new Image();
+      img.src = `${p.photo}?width=500&quality=70`;
+    });
+  }
+
+  /* -------- LIKES -------- */
 
   async function loadLikes() {
     const { data } = await supabase
@@ -58,23 +106,41 @@ export default function Explore({ user }) {
     }
   }
 
+  /* -------- PERFILES (RPC OPTIMIZADO) -------- */
+
   async function loadProfiles() {
+    if (loadingRef.current) return;
+
+    loadingRef.current = true;
     setLoading(true);
 
-    const from = page * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
+    const offset = page * PAGE_SIZE;
 
-    const { data } = await supabase.from("users").select("*").range(from, to);
+    const { data, error } = await supabase.rpc("get_explore_profiles", {
+      p_user: user.id,
+      limit_count: PAGE_SIZE,
+      offset_count: offset,
+    });
 
-    if (data) {
-      const filtered = data.filter((p) => p.id !== user.id);
-      const shuffled = filtered.sort(() => Math.random() - 0.5);
+    if (!error && data) {
+      const shuffled = data.sort(() => Math.random() - 0.5);
 
-      setProfiles((prev) => [...prev, ...shuffled]);
+      setProfiles((prev) => {
+        const updated = [...prev, ...shuffled];
+
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify(updated));
+
+        preloadImages(shuffled);
+
+        return updated;
+      });
     }
 
     setLoading(false);
+    loadingRef.current = false;
   }
+
+  /* -------- LIKE / UNLIKE -------- */
 
   async function toggleLike(id) {
     const liked = likes.has(id);
@@ -88,6 +154,7 @@ export default function Explore({ user }) {
 
       const newLikes = new Set(likes);
       newLikes.delete(id);
+
       setLikes(newLikes);
     } else {
       await supabase
@@ -98,10 +165,23 @@ export default function Explore({ user }) {
         );
 
       setLikes(new Set([...likes, id]));
+
+      const { data: match } = await supabase
+        .from("likes")
+        .select("*")
+        .eq("from_user", id)
+        .eq("to_user", user.id)
+        .maybeSingle();
+
+      if (match) {
+        console.log("MATCH!");
+      }
     }
 
     window.dispatchEvent(new Event("likesUpdated"));
   }
+
+  /* -------- SWIPE -------- */
 
   function handleSwipeLike(id) {
     toggleLike(id);
@@ -166,7 +246,14 @@ export default function Explore({ user }) {
       {mode !== 2 && (
         <div ref={loader} className="flex justify-center py-6">
           {loading && (
-            <div className="w-10 h-10 border-4 border-pink-500 border-t-transparent rounded-full animate-spin" />
+            <div className="grid grid-cols-2 gap-3 w-full px-3">
+              {[...Array(4)].map((_, i) => (
+                <div
+                  key={i}
+                  className="animate-pulse rounded-2xl bg-gray-200 aspect-[3/4]"
+                />
+              ))}
+            </div>
           )}
         </div>
       )}
