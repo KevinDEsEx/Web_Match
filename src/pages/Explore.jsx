@@ -5,19 +5,20 @@ import SwipeCard from "../components/SwipeCard";
 
 const PAGE_SIZE = 12;
 const CACHE_KEY = "explore_profiles";
+const MAX_CACHE = 120;
 
 export default function Explore({ user }) {
   const [profiles, setProfiles] = useState([]);
   const [likes, setLikes] = useState(new Set());
-  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState(0);
   const [swipeIndex, setSwipeIndex] = useState(0);
+  const [cursor, setCursor] = useState(null);
 
   const loader = useRef(null);
   const loadingRef = useRef(false);
 
-  /* -------- CAMBIO DE MODO -------- */
+  /* ---------- CAMBIO DE MODO ---------- */
 
   useEffect(() => {
     function handleMode(e) {
@@ -30,70 +31,22 @@ export default function Explore({ user }) {
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
-  /* -------- CACHE LOCAL -------- */
+  /* ---------- CACHE ---------- */
 
   useEffect(() => {
     const cached = sessionStorage.getItem(CACHE_KEY);
 
     if (cached) {
       const parsed = JSON.parse(cached);
-
       setProfiles(parsed);
-
-      if (parsed.length >= PAGE_SIZE) {
-        setPage(Math.floor(parsed.length / PAGE_SIZE));
-      }
     }
   }, []);
 
-  /* -------- CARGAR LIKES -------- */
+  /* ---------- CARGAR LIKES ---------- */
 
   useEffect(() => {
     loadLikes();
   }, []);
-
-  /* -------- PAGINACIÓN -------- */
-
-  useEffect(() => {
-    loadProfiles();
-  }, [page]);
-
-  /* -------- SCROLL INFINITO -------- */
-
-  useEffect(() => {
-    if (mode === 2) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !loadingRef.current) {
-          setPage((p) => p + 1);
-        }
-      },
-
-      { rootMargin: "1200px" },
-    );
-
-    const current = loader.current;
-
-    if (current) observer.observe(current);
-
-    return () => {
-      if (current) observer.unobserve(current);
-    };
-  }, [mode]);
-
-  /* -------- PRECARGA IMÁGENES -------- */
-
-  function preloadImages(list) {
-    list.slice(0, 6).forEach((p) => {
-      if (!p.photo) return;
-
-      const img = new Image();
-      img.src = `${p.photo}?width=500&quality=70`;
-    });
-  }
-
-  /* -------- LIKES -------- */
 
   async function loadLikes() {
     const { data } = await supabase
@@ -106,7 +59,43 @@ export default function Explore({ user }) {
     }
   }
 
-  /* -------- PERFILES (RPC OPTIMIZADO) -------- */
+  /* ---------- SCROLL INFINITO ---------- */
+
+  useEffect(() => {
+    if (mode === 2) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loadingRef.current) {
+          loadProfiles();
+        }
+      },
+      { rootMargin: "1000px" },
+    );
+
+    const current = loader.current;
+
+    if (current) observer.observe(current);
+
+    return () => {
+      if (current) observer.unobserve(current);
+    };
+  }, [mode, cursor]);
+
+  /* ---------- PRECARGA DE IMÁGENES ---------- */
+
+  function preloadImages(list) {
+    const preloadCount = mode === 1 ? 10 : 6;
+
+    list.slice(0, preloadCount).forEach((p) => {
+      if (!p.photo) return;
+
+      const img = new Image();
+      img.src = `${p.photo}?width=500&quality=70`;
+    });
+  }
+
+  /* ---------- CARGAR PERFILES ---------- */
 
   async function loadProfiles() {
     if (loadingRef.current) return;
@@ -114,33 +103,39 @@ export default function Explore({ user }) {
     loadingRef.current = true;
     setLoading(true);
 
-    const offset = page * PAGE_SIZE;
-
-    const { data, error } = await supabase.rpc("get_explore_profiles", {
+    const { data, error } = await supabase.rpc("get_explore_profiles_v2", {
       p_user: user.id,
+      last_created: cursor,
       limit_count: PAGE_SIZE,
-      offset_count: offset,
     });
 
-    if (!error && data) {
-      const shuffled = data.sort(() => Math.random() - 0.5);
-
+    if (!error && data && data.length > 0) {
       setProfiles((prev) => {
-        const updated = [...prev, ...shuffled];
+        const merged = [...prev, ...data];
 
-        sessionStorage.setItem(CACHE_KEY, JSON.stringify(updated));
+        const trimmed = merged.slice(-MAX_CACHE);
 
-        preloadImages(shuffled);
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify(trimmed));
 
-        return updated;
+        preloadImages(data);
+
+        return trimmed;
       });
+
+      setCursor(data[data.length - 1].created_at);
+    }
+
+    /* Si se terminan los perfiles → reiniciar */
+
+    if (!data || data.length < PAGE_SIZE) {
+      setCursor(null);
     }
 
     setLoading(false);
     loadingRef.current = false;
   }
 
-  /* -------- LIKE / UNLIKE -------- */
+  /* ---------- LIKE / UNLIKE ---------- */
 
   async function toggleLike(id) {
     const liked = likes.has(id);
@@ -181,7 +176,7 @@ export default function Explore({ user }) {
     window.dispatchEvent(new Event("likesUpdated"));
   }
 
-  /* -------- SWIPE -------- */
+  /* ---------- SWIPE ---------- */
 
   function handleSwipeLike(id) {
     toggleLike(id);
@@ -191,6 +186,8 @@ export default function Explore({ user }) {
   function handleSwipeSkip() {
     setSwipeIndex((i) => i + 1);
   }
+
+  /* ---------- UI ---------- */
 
   return (
     <div className="min-h-screen pb-28">
