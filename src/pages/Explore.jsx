@@ -7,6 +7,9 @@ const PAGE_SIZE = 12;
 const CACHE_KEY = "explore_profiles";
 const MAX_CACHE = 120;
 
+/* NUEVO: límite de renderizado */
+const RENDER_LIMIT = 40;
+
 export default function Explore({ user }) {
   const [profiles, setProfiles] = useState([]);
   const [likes, setLikes] = useState(new Set());
@@ -17,6 +20,9 @@ export default function Explore({ user }) {
 
   const loader = useRef(null);
   const loadingRef = useRef(false);
+
+  /* perfiles realmente renderizados */
+  const visibleProfiles = profiles.slice(-RENDER_LIMIT);
 
   /* ---------- CAMBIO DE MODO ---------- */
 
@@ -125,8 +131,6 @@ export default function Explore({ user }) {
       setCursor(data[data.length - 1].created_at);
     }
 
-    /* Si se terminan los perfiles → reiniciar */
-
     if (!data || data.length < PAGE_SIZE) {
       setCursor(null);
     }
@@ -193,7 +197,7 @@ export default function Explore({ user }) {
     <div className="min-h-screen pb-28">
       {mode === 0 && (
         <div className="grid grid-cols-1 gap-4 p-3">
-          {profiles.map((p) => (
+          {visibleProfiles.map((p) => (
             <UserCard
               key={p.id}
               user={p}
@@ -208,7 +212,7 @@ export default function Explore({ user }) {
 
       {mode === 1 && (
         <div className="grid grid-cols-2 gap-3 p-3">
-          {profiles.map((p) => (
+          {visibleProfiles.map((p) => (
             <UserCard
               key={p.id}
               user={p}

@@ -5,10 +5,21 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
 
   const [smallHeart, setSmallHeart] = useState(false);
   const [bigHeart, setBigHeart] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  /* tamaño optimizado según layout */
+
+  const imgWidth = grid ? 320 : 420;
+
+  /* imagen optimizada */
 
   const image = user.photo
-    ? `${user.photo}?width=500&quality=70`
-    : "https://images.unsplash.com/photo-1503023345310-bd7c1de61c7d?w=500&q=70";
+    ? `${user.photo}?width=${imgWidth}&quality=60`
+    : "https://images.unsplash.com/photo-1503023345310-bd7c1de61c7d?w=400&q=60";
+
+  /* preview blur muy ligera */
+
+  const blurImage = user.photo ? `${user.photo}?width=20&quality=20` : image;
 
   const description =
     user.description?.trim() ||
@@ -40,12 +51,30 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
       ${user.premium ? "border-2 border-yellow-400 premium-glow" : ""}`}
     >
       <div className={`${grid ? "aspect-square" : "aspect-[3/4]"} relative`}>
+        {/* Blur preview */}
+        <img
+          src={blurImage}
+          alt=""
+          className={`absolute inset-0 w-full h-full object-cover blur-lg scale-110 transition-opacity duration-500 ${
+            loaded ? "opacity-0" : "opacity-100"
+          }`}
+        />
+
+        {/* Skeleton mientras carga */}
+        {!loaded && (
+          <div className="absolute inset-0 bg-gray-200 animate-pulse" />
+        )}
+
+        {/* Imagen real */}
         <img
           src={image}
           loading="lazy"
           decoding="async"
           alt={user.name}
-          className="w-full h-full object-cover"
+          onLoad={() => setLoaded(true)}
+          className={`w-full h-full object-cover transition-opacity duration-500 ${
+            loaded ? "opacity-100" : "opacity-0"
+          }`}
         />
       </div>
 
