@@ -1,25 +1,28 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useMemo } from "react";
+import React from "react";
 
-export default function UserCard({ user, liked, onLike, grid, isMe }) {
+function UserCard({ user, liked, onLike, grid, isMe }) {
   const lastTap = useRef(0);
 
   const [smallHeart, setSmallHeart] = useState(false);
   const [bigHeart, setBigHeart] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  /* tamaño optimizado según layout */
+  /* tamaño optimizado */
 
   const imgWidth = grid ? 320 : 420;
 
-  /* imagen optimizada */
+  /* URLs de imagen optimizadas */
 
-  const image = user.photo
-    ? `${user.photo}?width=${imgWidth}&quality=60`
-    : "https://images.unsplash.com/photo-1503023345310-bd7c1de61c7d?w=400&q=60";
+  const { image, blurImage } = useMemo(() => {
+    const main = user.photo
+      ? `${user.photo}?width=${imgWidth}&quality=60`
+      : "https://images.unsplash.com/photo-1503023345310-bd7c1de61c7d?w=400&q=60";
 
-  /* preview blur muy ligera */
+    const blur = user.photo ? `${user.photo}?width=20&quality=20` : main;
 
-  const blurImage = user.photo ? `${user.photo}?width=20&quality=20` : image;
+    return { image: main, blurImage: blur };
+  }, [user.photo, imgWidth]);
 
   const description =
     user.description?.trim() ||
@@ -51,7 +54,8 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
       ${user.premium ? "border-2 border-yellow-400 premium-glow" : ""}`}
     >
       <div className={`${grid ? "aspect-square" : "aspect-[3/4]"} relative`}>
-        {/* Blur preview */}
+        {/* blur preview */}
+
         <img
           src={blurImage}
           alt=""
@@ -60,16 +64,19 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
           }`}
         />
 
-        {/* Skeleton mientras carga */}
+        {/* skeleton */}
+
         {!loaded && (
           <div className="absolute inset-0 bg-gray-200 animate-pulse" />
         )}
 
-        {/* Imagen real */}
+        {/* imagen principal */}
+
         <img
           src={image}
           loading="lazy"
           decoding="async"
+          fetchpriority="low"
           alt={user.name}
           onLoad={() => setLoaded(true)}
           className={`w-full h-full object-cover transition-opacity duration-500 ${
@@ -140,3 +147,5 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
     </div>
   );
 }
+
+export default React.memo(UserCard);

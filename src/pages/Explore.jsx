@@ -2,12 +2,11 @@ import { useEffect, useState, useRef } from "react";
 import { supabase } from "../services/supabase";
 import UserCard from "../components/UserCard";
 import SwipeCard from "../components/SwipeCard";
+import SearchFilters from "../components/SearchFilters";
 
 const PAGE_SIZE = 12;
 const CACHE_KEY = "explore_profiles";
 const MAX_CACHE = 120;
-
-/* NUEVO: límite de renderizado */
 const RENDER_LIMIT = 40;
 
 export default function Explore({ user }) {
@@ -18,11 +17,16 @@ export default function Explore({ user }) {
   const [swipeIndex, setSwipeIndex] = useState(0);
   const [cursor, setCursor] = useState(null);
 
+  const [filters, setFilters] = useState({
+    search: "",
+    gender: "Todos",
+  });
+
   const loader = useRef(null);
   const loadingRef = useRef(false);
 
-  /* perfiles realmente renderizados */
   const visibleProfiles = profiles.slice(-RENDER_LIMIT);
+  const currentProfile = profiles[swipeIndex];
 
   /* ---------- CAMBIO DE MODO ---------- */
 
@@ -36,6 +40,17 @@ export default function Explore({ user }) {
 
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
+
+  /* ---------- BLOQUEAR SCROLL EN SWIPE ---------- */
+
+  useEffect(() => {
+    if (mode === 2) document.body.style.overflow = "hidden";
+    else document.body.style.overflow = "";
+
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [mode]);
 
   /* ---------- CACHE ---------- */
 
@@ -101,23 +116,36 @@ export default function Explore({ user }) {
     });
   }
 
+  /* ---------- PREFETCH SIGUIENTE PERFIL ---------- */
+
+  useEffect(() => {
+    const next = profiles[swipeIndex + 1];
+
+    if (next?.photo) {
+      const img = new Image();
+      img.src = `${next.photo}?width=600&quality=60`;
+    }
+  }, [swipeIndex, profiles]);
+
   /* ---------- CARGAR PERFILES ---------- */
 
-  async function loadProfiles() {
+  async function loadProfiles(reset = false) {
     if (loadingRef.current) return;
 
     loadingRef.current = true;
     setLoading(true);
 
-    const { data, error } = await supabase.rpc("get_explore_profiles_v2", {
+    const { data, error } = await supabase.rpc("get_explore_profiles_v3", {
       p_user: user.id,
-      last_created: cursor,
+      p_search: filters.search || "",
+      p_gender: filters.gender,
+      last_created: reset ? null : cursor,
       limit_count: PAGE_SIZE,
     });
 
     if (!error && data && data.length > 0) {
       setProfiles((prev) => {
-        const merged = [...prev, ...data];
+        const merged = reset ? data : [...prev, ...data];
 
         const trimmed = merged.slice(-MAX_CACHE);
 
@@ -138,6 +166,14 @@ export default function Explore({ user }) {
     setLoading(false);
     loadingRef.current = false;
   }
+
+  /* ---------- CUANDO CAMBIAN FILTROS ---------- */
+
+  useEffect(() => {
+    setCursor(null);
+    setProfiles([]);
+    loadProfiles(true);
+  }, [filters]);
 
   /* ---------- LIKE / UNLIKE ---------- */
 
@@ -172,9 +208,7 @@ export default function Explore({ user }) {
         .eq("to_user", user.id)
         .maybeSingle();
 
-      if (match) {
-        console.log("MATCH!");
-      }
+      if (match) console.log("MATCH!");
     }
 
     window.dispatchEvent(new Event("likesUpdated"));
@@ -191,10 +225,22 @@ export default function Explore({ user }) {
     setSwipeIndex((i) => i + 1);
   }
 
-  /* ---------- UI ---------- */
-
   return (
     <div className="min-h-screen pb-28">
+      {mode !== 2 && (
+        <SearchFilters
+          results={visibleProfiles.length}
+          onChange={(newFilters) => {
+            setFilters((prev) => ({
+              ...prev,
+              ...newFilters,
+            }));
+          }}
+        />
+      )}
+
+      {/* LISTA */}
+
       {mode === 0 && (
         <div className="grid grid-cols-1 gap-4 p-3">
           {visibleProfiles.map((p) => (
@@ -209,6 +255,8 @@ export default function Explore({ user }) {
           ))}
         </div>
       )}
+
+      {/* GRID */}
 
       {mode === 1 && (
         <div className="grid grid-cols-2 gap-3 p-3">
@@ -225,24 +273,22 @@ export default function Explore({ user }) {
         </div>
       )}
 
+      {/* SWIPE */}
+
       {mode === 2 && (
         <div className="relative flex flex-col items-center mt-6 px-4">
-          <div className="text-sm text-gray-500 mb-4 text-center">
-            Desliza → para marcar interés ❤️
-            <br />
-            Desliza ← para pasar
-          </div>
-
-          {profiles.slice(swipeIndex, swipeIndex + 1).map((p) => (
+          {currentProfile && (
             <SwipeCard
-              key={p.id}
-              user={p}
+              key={currentProfile.id}
+              user={currentProfile}
               onLike={handleSwipeLike}
               onSkip={handleSwipeSkip}
             />
-          ))}
+          )}
         </div>
       )}
+
+      {/* LOADER */}
 
       {mode !== 2 && (
         <div ref={loader} className="flex justify-center py-6">

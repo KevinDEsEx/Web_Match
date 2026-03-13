@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../services/supabase";
 import { useNavigate } from "react-router-dom";
 import imageCompression from "browser-image-compression";
 
 export default function CompleteProfile({ user }) {
   const navigate = useNavigate();
+
+  const [isChecking, setIsChecking] = useState(true); // ← NUEVO: verificación segura
 
   const [name, setName] = useState(user?.user_metadata?.name || "");
   const [phone, setPhone] = useState("");
@@ -22,60 +24,72 @@ export default function CompleteProfile({ user }) {
 
   const formValid = name && phone && gender && age;
 
+  // ==================== VERIFICACIÓN SEGURA ====================
+  useEffect(() => {
+    async function checkIfExists() {
+      const { data } = await supabase
+        .from("users")
+        .select("id")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (data) {
+        navigate("/"); // Ya existe → nunca mostramos el formulario
+        return;
+      }
+      setIsChecking(false);
+    }
+    checkIfExists();
+  }, [user.id, navigate]);
+
+  if (isChecking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-16 h-16 border-4 border-pink-500 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-sm text-gray-500">Verificando perfil...</p>
+        </div>
+      </div>
+    );
+  }
+  // ============================================================
+
   function validate() {
     let newErrors = {};
-
     if (name.length < 3) newErrors.name = "Nombre demasiado corto";
-
     if (phone && !/^[0-9]+$/.test(phone)) newErrors.phone = "Solo números";
-
     if (age && !/^[0-9]+$/.test(age)) newErrors.age = "Edad inválida";
-
     setErrors(newErrors);
-
     return Object.keys(newErrors).length === 0;
   }
-
-  /* SELECCIONAR FOTO */
 
   async function handleFileSelect(e) {
     const file = e.target.files[0];
     if (!file) return;
-
     const compressed = await imageCompression(file, {
       maxSizeMB: 0.3,
       maxWidthOrHeight: 800,
       useWebWorker: true,
     });
-
     setPhotoFile(compressed);
     setPhotoUrlPreview(URL.createObjectURL(compressed));
   }
 
-  /* GUARDAR PERFIL */
-
   async function saveProfile() {
     if (!validate()) return;
-
     setLoading(true);
 
     let finalPhotoUrl = photoUrlPreview;
-
     if (photoFile) {
       const fileName = `${user.id}-${Date.now()}.jpg`;
-
       const { error } = await supabase.storage
         .from("avatars")
-        .upload(fileName, photoFile, {
-          cacheControl: "3600",
-          upsert: true,
-        });
+        .upload(fileName, photoFile, { cacheControl: "3600", upsert: true });
 
       if (!error) {
         const { data } = supabase.storage
           .from("avatars")
           .getPublicUrl(fileName);
-
         finalPhotoUrl = data.publicUrl;
       }
     }
@@ -93,7 +107,6 @@ export default function CompleteProfile({ user }) {
     });
 
     setLoading(false);
-
     if (!error) navigate("/explore");
   }
 
@@ -121,7 +134,6 @@ export default function CompleteProfile({ user }) {
             alt="Avatar"
             className="w-28 h-28 rounded-full object-cover border"
           />
-
           <label className="mt-3 text-blue-600 text-sm cursor-pointer">
             Cambiar foto
             <input

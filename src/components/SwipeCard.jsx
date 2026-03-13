@@ -1,90 +1,72 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
-export default function SwipeCard({ user, onLike, onSkip }) {
-  const [startX, setStartX] = useState(0);
-  const [moveX, setMoveX] = useState(0);
-  const [dragging, setDragging] = useState(false);
+const genders = ["Todos", "Hombre", "Mujer", "Otro"];
 
-  function start(clientX) {
-    setStartX(clientX);
-    setDragging(true);
-  }
+export default function SearchFilters({ onChange, results }) {
+  const [search, setSearch] = useState("");
+  const [gender, setGender] = useState("Todos");
 
-  function move(clientX) {
-    if (!dragging) return;
-    setMoveX(clientX - startX);
-  }
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onChange({ search: search.trim(), gender });
+    }, 250);
 
-  function end() {
-    if (!dragging) return;
-
-    if (moveX > 120) {
-      onLike(user.id);
-    } else if (moveX < -120) {
-      onSkip();
-    }
-
-    setMoveX(0);
-    setDragging(false);
-  }
+    return () => clearTimeout(timer);
+  }, [search, gender, onChange]); // ← AÑADIDO onChange
 
   return (
-    <div
-      onMouseDown={(e) => start(e.clientX)}
-      onMouseMove={(e) => move(e.clientX)}
-      onMouseUp={end}
-      onMouseLeave={end}
-      onTouchStart={(e) => start(e.touches[0].clientX)}
-      onTouchMove={(e) => move(e.touches[0].clientX)}
-      onTouchEnd={end}
-      style={{
-        transform: `translateX(${moveX}px) rotate(${moveX / 18}deg)`,
-      }}
-      className="absolute w-full h-[72vh] rounded-3xl overflow-hidden shadow-2xl bg-white transition cursor-grab active:cursor-grabbing"
-    >
-      {/* FOTO */}
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{ backgroundImage: `url(${user.photo})` }}
-      />
+    <div className="sticky top-[56px] z-30 backdrop-blur-md bg-white/90 px-3 pt-3 pb-2 space-y-3 border-b border-gray-100">
+      {/* BUSCADOR */}
+      <div className="relative">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+          />
+        </svg>
 
-      {/* GRADIENTE */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-
-      {/* LIKE */}
-      {moveX > 40 && (
-        <div className="absolute top-10 left-6 text-green-400 text-4xl font-bold rotate-12">
-          LIKE ❤️
-        </div>
-      )}
-
-      {/* PASS */}
-      {moveX < -40 && (
-        <div className="absolute top-10 right-6 text-red-400 text-4xl font-bold -rotate-12">
-          PASS ❌
-        </div>
-      )}
-
-      {/* INFO */}
-      <div className="absolute bottom-0 p-4 text-white">
-        <h2 className="text-xl font-bold">
-          {user.name}, {user.age}
-        </h2>
-
-        <p>{user.gender}</p>
-
-        {user.description && (
-          <p className="text-sm opacity-90 mt-1 line-clamp-2">
-            {user.description}
-          </p>
-        )}
+        <input
+          type="search"
+          placeholder="Buscar por nombre..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full pl-10 pr-4 py-2.5 rounded-full border border-gray-200 bg-white shadow-sm text-sm focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent transition-all"
+        />
       </div>
 
-      {/* INSTRUCCIÓN */}
-      <div className="absolute top-3 w-full text-center text-white text-xs opacity-80">
-        👉 Arrastra a la derecha para interesarte ❤️ ❌ Arrastra a la izquierda
-        para pasar
+      {/* PÍLDORAS */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
+        {genders.map((g) => {
+          const isActive = gender === g;
+          return (
+            <button
+              key={g}
+              onClick={() => setGender(g)}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all duration-200 active:scale-95 ${
+                isActive
+                  ? "bg-pink-500 text-white shadow-md scale-105"
+                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+              }`}
+            >
+              {g}
+            </button>
+          );
+        })}
       </div>
+
+      {results !== undefined && (
+        <p className="text-xs text-gray-500 pl-1">
+          {results} resultado{results !== 1 ? "s" : ""}
+        </p>
+      )}
     </div>
   );
 }
