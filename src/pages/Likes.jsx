@@ -1,27 +1,50 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "../services/supabase";
 import UserCard from "../components/UserCard";
 import SearchFilterBar from "../components/SearchFilterBar";
 
+const CACHE_KEY = "likes_profiles";
+const RENDER_LIMIT = 40;
+
 export default function Likes({ user }) {
   const [profiles, setProfiles] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState(0);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [genderFilter, setGenderFilter] = useState("");
 
-  const filteredProfiles = profiles.filter((p) => {
-    const matchSearch = p.name?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchGender = genderFilter ? p.gender === genderFilter : true;
-    return matchSearch && matchGender;
-  });
+  /* ---------- FILTROS OPTIMIZADOS ---------- */
 
-  // cargar likes inicial
+  const filteredProfiles = useMemo(() => {
+    return profiles.filter((p) => {
+      const matchSearch = p.name
+        ?.toLowerCase()
+        .includes(searchQuery.toLowerCase());
+
+      const matchGender = genderFilter ? p.gender === genderFilter : true;
+
+      return matchSearch && matchGender;
+    });
+  }, [profiles, searchQuery, genderFilter]);
+
+  const visibleProfiles = filteredProfiles.slice(0, RENDER_LIMIT);
+
+  /* ---------- CACHE + CARGA INICIAL ---------- */
+
   useEffect(() => {
-    loadLikes();
+    const cached = sessionStorage.getItem(CACHE_KEY);
+
+    if (cached) {
+      setProfiles(JSON.parse(cached));
+      setLoading(false);
+    } else {
+      loadLikes();
+    }
   }, []);
 
-  // escuchar cambios globales de likes
+  /* ---------- ESCUCHAR CAMBIOS DE LIKES ---------- */
+
   useEffect(() => {
     function reload() {
       loadLikes();
@@ -32,7 +55,8 @@ export default function Likes({ user }) {
     return () => window.removeEventListener("likesUpdated", reload);
   }, []);
 
-  // escuchar cambio de modo desde el header
+  /* ---------- ESCUCHAR CAMBIO DE MODO ---------- */
+
   useEffect(() => {
     function handleMode(e) {
       setMode(e.detail);
@@ -43,38 +67,45 @@ export default function Likes({ user }) {
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
-  // cargar usuarios que has marcado
+  /* ---------- CARGAR LIKES ---------- */
+
   async function loadLikes() {
-    const { data } = await supabase
+    setLoading(true);
+
+    const { data, error } = await supabase
       .from("likes")
-      .select("to_user")
+      .select(
+        `
+        to_user,
+        users:to_user (*)
+      `,
+      )
       .eq("from_user", user.id);
 
-    if (!data || data.length === 0) {
+    if (error || !data) {
       setProfiles([]);
+      setLoading(false);
       return;
     }
 
-    const ids = data.map((l) => l.to_user);
+    const users = data.map((l) => l.users).filter(Boolean);
 
-    const { data: users } = await supabase
-      .from("users")
-      .select("*")
-      .in("id", ids);
-
-    if (!users) {
-      setProfiles([]);
-      return;
-    }
+    /* eliminar duplicados */
 
     const uniqueMap = new Map();
     users.forEach((u) => uniqueMap.set(u.id, u));
+
     const uniqueUsers = Array.from(uniqueMap.values());
 
     setProfiles(uniqueUsers);
+
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify(uniqueUsers));
+
+    setLoading(false);
   }
 
-  // desmarcar interés
+  /* ---------- QUITAR LIKE ---------- */
+
   async function toggleLike(id) {
     await supabase
       .from("likes")
@@ -82,12 +113,26 @@ export default function Likes({ user }) {
       .eq("from_user", user.id)
       .eq("to_user", id);
 
-    // eliminar de la lista actual
-    setProfiles((prev) => prev.filter((u) => u.id !== id));
+    const updated = profiles.filter((u) => u.id !== id);
 
-    // avisar al resto de pantallas
+    setProfiles(updated);
+
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify(updated));
+
     window.dispatchEvent(new Event("likesUpdated"));
   }
+
+  /* ---------- LOADER ---------- */
+
+  if (loading) {
+    return (
+      <div className="flex justify-center mt-20">
+        <div className="w-14 h-14 border-4 border-pink-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  /* ---------- UI ---------- */
 
   return (
     <div className="min-h-screen pb-28 bg-gray-50 border-t">
@@ -102,11 +147,11 @@ export default function Likes({ user }) {
       )}
 
       {profiles.length > 0 && (
-        <SearchFilterBar 
-          search={searchQuery} 
-          setSearch={setSearchQuery} 
-          genderFilter={genderFilter} 
-          setGenderFilter={setGenderFilter} 
+        <SearchFilterBar
+          search={searchQuery}
+          setSearch={setSearchQuery}
+          genderFilter={genderFilter}
+          setGenderFilter={setGenderFilter}
         />
       )}
 
@@ -115,7 +160,7 @@ export default function Likes({ user }) {
           mode === 1 ? "grid-cols-2" : "grid-cols-1"
         }`}
       >
-        {filteredProfiles.map((p) => (
+        {visibleProfiles.map((p) => (
           <UserCard
             key={p.id}
             user={p}

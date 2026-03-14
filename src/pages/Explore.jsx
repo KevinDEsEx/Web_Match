@@ -32,7 +32,7 @@ export default function Explore({ user }) {
     return matchSearch && matchGender;
   });
 
-  const visibleProfiles = filteredProfiles.slice(-RENDER_LIMIT);
+  const visibleProfiles = filteredProfiles.slice(0, RENDER_LIMIT);
 
   /* ---------- FIX: RESET SWIPE INDEX EN BÚSQUEDA ---------- */
   useEffect(() => {
