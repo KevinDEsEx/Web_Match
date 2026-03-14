@@ -1,10 +1,21 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../services/supabase";
 import UserCard from "../components/UserCard";
+import { toast } from "react-toastify";
+import SearchFilterBar from "../components/SearchFilterBar";
 
 export default function Matches({ user }) {
   const [profiles, setProfiles] = useState([]);
   const [mode, setMode] = useState(0);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [genderFilter, setGenderFilter] = useState("");
+
+  const filteredProfiles = profiles.filter((p) => {
+    const matchSearch = p.name?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchGender = genderFilter ? p.gender === genderFilter : true;
+    return matchSearch && matchGender;
+  });
 
   useEffect(() => {
     loadMatches();
@@ -75,7 +86,11 @@ export default function Matches({ user }) {
 
     if (!users) return;
 
-    const enriched = users.map((u) => ({
+    const uniqueMap = new Map();
+    users.forEach((u) => uniqueMap.set(u.id, u));
+    const uniqueUsers = Array.from(uniqueMap.values());
+
+    const enriched = uniqueUsers.map((u) => ({
       ...u,
       matchActive: matchIds.includes(u.id),
     }));
@@ -85,7 +100,7 @@ export default function Matches({ user }) {
 
   function openWhatsapp(profile) {
     if (!profile.phone) {
-      alert("Este usuario no tiene teléfono registrado.");
+      toast.warning("Este usuario no tiene teléfono registrado.");
       return;
     }
 
@@ -100,7 +115,7 @@ export default function Matches({ user }) {
   }
 
   return (
-    <div className="min-h-screen pb-28">
+    <div className="min-h-screen pb-28 bg-gray-50 border-t">
       {profiles.length === 0 && (
         <div className="text-center mt-20 text-gray-500">
           <p className="text-lg font-semibold">Aún no tienes matches</p>
@@ -111,10 +126,19 @@ export default function Matches({ user }) {
         </div>
       )}
 
+      {profiles.length > 0 && (
+        <SearchFilterBar 
+          search={searchQuery} 
+          setSearch={setSearchQuery} 
+          genderFilter={genderFilter} 
+          setGenderFilter={setGenderFilter} 
+        />
+      )}
+
       {/* TARJETAS GRANDES */}
       {mode === 0 && (
         <div className="grid grid-cols-1 gap-6 p-3 max-w-md mx-auto">
-          {profiles.map((p) => (
+          {filteredProfiles.map((p) => (
             <div key={p.id} className="flex flex-col items-center w-full">
               {/* 🔥 FIX: w-full */}
               <div className="w-full">
@@ -153,7 +177,7 @@ export default function Matches({ user }) {
       {/* GRID */}
       {mode === 1 && (
         <div className="grid grid-cols-2 gap-4 p-3 max-w-md mx-auto">
-          {profiles.map((p) => (
+          {filteredProfiles.map((p) => (
             <div key={p.id} className="flex flex-col items-center w-full">
               {/* 🔥 FIX */}
               <div className="w-full">

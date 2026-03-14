@@ -1,10 +1,20 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../services/supabase";
 import UserCard from "../components/UserCard";
+import SearchFilterBar from "../components/SearchFilterBar";
 
 export default function Likes({ user }) {
   const [profiles, setProfiles] = useState([]);
   const [mode, setMode] = useState(0);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [genderFilter, setGenderFilter] = useState("");
+
+  const filteredProfiles = profiles.filter((p) => {
+    const matchSearch = p.name?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchGender = genderFilter ? p.gender === genderFilter : true;
+    return matchSearch && matchGender;
+  });
 
   // cargar likes inicial
   useEffect(() => {
@@ -52,7 +62,16 @@ export default function Likes({ user }) {
       .select("*")
       .in("id", ids);
 
-    setProfiles(users || []);
+    if (!users) {
+      setProfiles([]);
+      return;
+    }
+
+    const uniqueMap = new Map();
+    users.forEach((u) => uniqueMap.set(u.id, u));
+    const uniqueUsers = Array.from(uniqueMap.values());
+
+    setProfiles(uniqueUsers);
   }
 
   // desmarcar interés
@@ -71,7 +90,7 @@ export default function Likes({ user }) {
   }
 
   return (
-    <div className="min-h-screen pb-28">
+    <div className="min-h-screen pb-28 bg-gray-50 border-t">
       {profiles.length === 0 && (
         <div className="text-center mt-20 text-gray-500">
           <p className="text-lg font-semibold">Aún no has marcado intereses</p>
@@ -82,12 +101,21 @@ export default function Likes({ user }) {
         </div>
       )}
 
+      {profiles.length > 0 && (
+        <SearchFilterBar 
+          search={searchQuery} 
+          setSearch={setSearchQuery} 
+          genderFilter={genderFilter} 
+          setGenderFilter={setGenderFilter} 
+        />
+      )}
+
       <div
         className={`p-3 gap-3 grid ${
           mode === 1 ? "grid-cols-2" : "grid-cols-1"
         }`}
       >
-        {profiles.map((p) => (
+        {filteredProfiles.map((p) => (
           <UserCard
             key={p.id}
             user={p}

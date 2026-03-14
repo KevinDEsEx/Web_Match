@@ -51,7 +51,8 @@ export default function Header() {
     }
   }, [location.pathname]);
 
-  if (location.pathname === "/profile") return null;
+  const allowedPaths = ["/", "/explore", "/likes", "/matches"];
+  if (!allowedPaths.includes(location.pathname)) return null;
 
   return (
     <header className="sticky top-0 z-40 bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow">

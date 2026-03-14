@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../services/supabase";
 import UserCard from "../components/UserCard";
+import { toast } from "react-toastify";
 
 export default function Profile({ user }) {
   const [profile, setProfile] = useState(null);
@@ -27,7 +28,7 @@ export default function Profile({ user }) {
 
   async function saveProfile() {
     if (!profile.name || !profile.age || !profile.gender || !profile.phone) {
-      alert("Los campos nombre, edad, género y teléfono son obligatorios.");
+      toast.warning("Los campos nombre, edad, género y teléfono son obligatorios.");
       return;
     }
 
@@ -47,7 +48,7 @@ export default function Profile({ user }) {
 
     setSaving(false);
 
-    alert("Perfil actualizado correctamente ✅");
+    toast.success("Perfil actualizado correctamente ✅");
   }
 
   async function uploadPhoto(e) {
@@ -62,7 +63,7 @@ export default function Profile({ user }) {
       .upload(filePath, file);
 
     if (error) {
-      alert("Error subiendo imagen");
+      toast.error("Error subiendo imagen");
       return;
     }
 
@@ -73,7 +74,6 @@ export default function Profile({ user }) {
 
   async function logout() {
     await supabase.auth.signOut();
-    window.location.reload();
   }
 
   if (!profile) return null;

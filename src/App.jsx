@@ -1,6 +1,8 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { supabase } from "./services/supabase";
+import { ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 import BottomNav from "./components/BottomNav";
 import Header from "./components/Header";
@@ -91,6 +93,7 @@ function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-white">
+      <ToastContainer position="top-center" autoClose={3000} hideProgressBar />
       {/* HEADER */}
       {session && <Header />}
 
