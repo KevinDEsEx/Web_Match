@@ -62,6 +62,8 @@ function App() {
     }
 
     async function loadProfile() {
+      setLoadingProfile(true);
+
       const { data } = await supabase
         .from("users")
         .select("*")
@@ -76,7 +78,30 @@ function App() {
     }
 
     loadProfile();
+
+    /* ESCUCHAR ACTUALIZACIÓN DEL PERFIL */
+    function handleProfileUpdate() {
+      loadProfile();
+    }
+
+    window.addEventListener("profileUpdated", handleProfileUpdate);
+
+    return () => {
+      window.removeEventListener("profileUpdated", handleProfileUpdate);
+    };
   }, [session]);
+
+  /* ---------- FUNCIÓN PARA COMPLETE PROFILE ---------- */
+
+  async function handleProfileSaved() {
+    const { data } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", session.user.id)
+      .maybeSingle();
+
+    setProfile(data);
+  }
 
   /* ---------- LOADER GLOBAL ---------- */
 
@@ -94,10 +119,12 @@ function App() {
   return (
     <div className="min-h-screen flex flex-col bg-white">
       <ToastContainer position="top-center" autoClose={3000} hideProgressBar />
+
       {/* HEADER */}
       {session && <Header />}
 
       {/* CONTENIDO PRINCIPAL */}
+
       <div className="flex-1 pb-24">
         {session && loadingProfile ? (
           <div className="flex flex-col items-center justify-center py-20 gap-4">
@@ -126,7 +153,10 @@ function App() {
                     profile ? (
                       <Navigate to="/" />
                     ) : (
-                      <CompleteProfile user={session.user} />
+                      <CompleteProfile
+                        user={session.user}
+                        onProfileSaved={handleProfileSaved}
+                      />
                     )
                   ) : (
                     <Navigate to="/login" />
@@ -198,6 +228,7 @@ function App() {
       </div>
 
       {/* NAVBAR */}
+
       {session && profile && location.pathname !== "/complete-profile" && (
         <BottomNav />
       )}

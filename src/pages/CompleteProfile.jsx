@@ -8,8 +8,13 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 
 const formSchema = z.object({
-  name: z.string().min(3, { message: "El nombre debe tener al menos 3 caracteres" }),
-  phone: z.string().min(6, { message: "Número inválido" }).regex(/^\d+$/, "Solo números"),
+  name: z
+    .string()
+    .min(3, { message: "El nombre debe tener al menos 3 caracteres" }),
+  phone: z
+    .string()
+    .min(6, { message: "Número inválido" })
+    .regex(/^\d+$/, "Solo números"),
   age: z.coerce
     .number({ invalid_type_error: "Debe ser un número" })
     .min(18, { message: "Debes ser mayor de 18 años" })
@@ -29,18 +34,17 @@ const COUNTRY_PREFIXES = [
   { code: "+54", country: "Argentina 🇦🇷" },
 ];
 
-export default function CompleteProfile({ user }) {
+export default function CompleteProfile({ user, onProfileSaved }) {
   const navigate = useNavigate();
 
   const [photoFile, setPhotoFile] = useState(null);
   const [photoUrlPreview, setPhotoUrlPreview] = useState(
     user?.user_metadata?.avatar_url || "",
   );
-  
+
   const [prefix, setPrefix] = useState("+53");
   const [loading, setLoading] = useState(false);
 
-  // Parse age if already set
   let initialAge = "";
   if (user?.user_metadata?.age) {
     initialAge = parseInt(user.user_metadata.age);
@@ -49,7 +53,6 @@ export default function CompleteProfile({ user }) {
   const {
     control,
     handleSubmit,
-    setValue,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(formSchema),
@@ -63,6 +66,7 @@ export default function CompleteProfile({ user }) {
   });
 
   /* CONTROL FOTO */
+
   async function handleFileSelect(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -82,80 +86,110 @@ export default function CompleteProfile({ user }) {
   }
 
   /* GUARDAR PERFIL */
+
   async function onSubmit(data) {
     setLoading(true);
 
     let finalPhotoUrl = photoUrlPreview;
 
-    if (photoFile) {
-      const fileName = `${user.id}-${Date.now()}.jpg`;
+    try {
+      if (photoFile) {
+        const fileName = `${user.id}-${Date.now()}.jpg`;
 
-      const { error: uploadError } = await supabase.storage
-        .from("avatars")
-        .upload(fileName, photoFile, {
-          cacheControl: "3600",
-          upsert: true,
-        });
+        const { error: uploadError } = await supabase.storage
+          .from("avatars")
+          .upload(fileName, photoFile, {
+            cacheControl: "3600",
+            upsert: true,
+          });
 
-      if (uploadError) {
-        toast.error("Error al subir la imagen a la nube.");
+        if (uploadError) {
+          toast.error("Error al subir la imagen a la nube.");
+          setLoading(false);
+          return;
+        }
+
+        const { data: bgData } = supabase.storage
+          .from("avatars")
+          .getPublicUrl(fileName);
+
+        finalPhotoUrl = bgData.publicUrl;
+      }
+
+      const unspacedPhone = data.phone.replace(/\s+/g, "");
+      const fullPhone = prefix + unspacedPhone;
+
+      const { error } = await supabase.from("users").upsert({
+        id: user.id,
+        name: data.name,
+        phone: fullPhone,
+        gender: data.gender,
+        age: data.age,
+        description:
+          data.description ||
+          "Descúbreme en TENET ✨ quizás tengamos más en común de lo que imaginas.",
+        photo: finalPhotoUrl,
+      });
+
+      if (error) {
+        toast.error("Error al guardar el perfil en la base de datos.");
         setLoading(false);
         return;
       }
 
-      const { data: bgData } = supabase.storage
-        .from("avatars")
-        .getPublicUrl(fileName);
+      toast.success("¡Perfil completado con éxito!");
 
-      finalPhotoUrl = bgData.publicUrl;
+      /* Actualizar estado global si existe */
+      if (onProfileSaved) {
+        await onProfileSaved();
+      } else {
+        /* fallback universal */
+        window.dispatchEvent(new Event("profileUpdated"));
+      }
+
+      navigate("/explore", { replace: true });
+    } catch (err) {
+      toast.error("Error inesperado.");
     }
-
-    const unspacedPhone = data.phone.replace(/\s+/g, "");
-    const fullPhone = prefix + unspacedPhone;
-
-    const { error } = await supabase.from("users").upsert({
-      id: user.id,
-      name: data.name,
-      phone: fullPhone,
-      gender: data.gender,
-      age: data.age,
-      description:
-        data.description ||
-        "Descúbreme en TENET ✨ quizás tengamos más en común de lo que imaginas.",
-      photo: finalPhotoUrl,
-    });
 
     setLoading(false);
-
-    if (error) {
-      toast.error("Error al guardar el perfil en la base de datos.");
-    } else {
-      toast.success("¡Perfil completado con éxito!");
-      navigate("/");
-    }
   }
 
   async function logout() {
     await supabase.auth.signOut();
   }
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-pink-500 p-6 px-4 text-center animate-pulse">
+        <div className="bg-white p-8 rounded-full shadow-2xl mb-8 flex items-center justify-center">
+          <span className="material-symbols-outlined text-[60px] text-pink-500">
+            favorite
+          </span>
+        </div>
+        <h2 className="text-3xl font-extrabold text-white mb-2 tracking-wide">
+          Entrando a TENET...
+        </h2>
+        <p className="text-pink-100 font-medium text-lg">
+          Preparando tus mejores matches
+        </p>
+
+        <div className="w-64 h-2 bg-pink-400 rounded-full mt-10 overflow-hidden relative">
+          <div className="absolute top-0 left-0 h-full bg-white rounded-full animate-[progress_2s_ease-in-out_infinite]"></div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100 p-6 relative">
-      {loading && (
-        <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-50 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-16 h-16 border-4 border-pink-500 border-t-transparent rounded-full animate-spin"></div>
-            <p className="text-white font-semibold shadow-sm">Guardando perfil...</p>
-          </div>
-        </div>
-      )}
-
       <div className="bg-white shadow-xl rounded-2xl p-8 w-full max-w-md">
         <h2 className="text-2xl font-bold text-center mb-6 text-gray-800">
           Sobre ti
         </h2>
 
         {/* FOTO */}
+
         <div className="flex flex-col items-center mb-6 relative">
           <div className="relative">
             <img
@@ -163,13 +197,14 @@ export default function CompleteProfile({ user }) {
               alt="Avatar"
               className="w-32 h-32 rounded-full object-cover border-4 border-pink-100 shadow-sm bg-gray-50"
             />
-            
+
             <label className="absolute bottom-0 right-0 bg-pink-500 hover:bg-pink-600 text-white p-2 rounded-full cursor-pointer shadow-lg transition transform hover:scale-105">
-              <span className="material-symbols-outlined text-[20px]">photo_camera</span>
+              <span className="material-symbols-outlined text-[20px]">
+                photo_camera
+              </span>
               <input
                 type="file"
                 accept="image/*"
-                capture="environment"
                 onChange={handleFileSelect}
                 className="hidden"
               />
@@ -178,8 +213,8 @@ export default function CompleteProfile({ user }) {
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          
           {/* NOMBRE */}
+
           <div>
             <Controller
               control={control}
@@ -190,16 +225,23 @@ export default function CompleteProfile({ user }) {
                   type="text"
                   autoComplete="name"
                   className={`w-full rounded-xl border p-3 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 transition ${
-                    errors.name ? "border-red-500 focus:ring-red-400" : "border-gray-200"
+                    errors.name
+                      ? "border-red-500 focus:ring-red-400"
+                      : "border-gray-200"
                   }`}
                   placeholder="Tu nombre o apodo"
                 />
               )}
             />
-            {errors.name && <p className="text-red-500 text-xs mt-1 ml-1">{errors.name.message}</p>}
+            {errors.name && (
+              <p className="text-red-500 text-xs mt-1 ml-1">
+                {errors.name.message}
+              </p>
+            )}
           </div>
 
-          {/* TELEFONO + PREFIJO */}
+          {/* TELEFONO */}
+
           <div>
             <div className="flex gap-2">
               <select
@@ -209,7 +251,7 @@ export default function CompleteProfile({ user }) {
               >
                 {COUNTRY_PREFIXES.map((country) => (
                   <option key={country.code} value={country.code}>
-                    {country.code} {country.country.split(' ')[0]}
+                    {country.code} {country.country.split(" ")[0]}
                   </option>
                 ))}
               </select>
@@ -229,7 +271,9 @@ export default function CompleteProfile({ user }) {
                         field.onChange(numeric);
                       }}
                       className={`w-full rounded-xl border p-3 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 transition ${
-                        errors.phone ? "border-red-500 focus:ring-red-400" : "border-gray-200"
+                        errors.phone
+                          ? "border-red-500 focus:ring-red-400"
+                          : "border-gray-200"
                       }`}
                       placeholder="Número de WhatsApp"
                     />
@@ -237,10 +281,16 @@ export default function CompleteProfile({ user }) {
                 />
               </div>
             </div>
-            {errors.phone && <p className="text-red-500 text-xs mt-1 ml-1">{errors.phone.message}</p>}
+
+            {errors.phone && (
+              <p className="text-red-500 text-xs mt-1 ml-1">
+                {errors.phone.message}
+              </p>
+            )}
           </div>
 
-          {/* EDAD Y GÉNERO */}
+          {/* EDAD Y GENERO */}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Controller
@@ -252,13 +302,19 @@ export default function CompleteProfile({ user }) {
                     type="number"
                     inputMode="numeric"
                     className={`w-full rounded-xl border p-3 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 transition ${
-                      errors.age ? "border-red-500 focus:ring-red-400" : "border-gray-200"
+                      errors.age
+                        ? "border-red-500 focus:ring-red-400"
+                        : "border-gray-200"
                     }`}
                     placeholder="Edad"
                   />
                 )}
               />
-              {errors.age && <p className="text-red-500 text-xs mt-1 ml-1">{errors.age.message}</p>}
+              {errors.age && (
+                <p className="text-red-500 text-xs mt-1 ml-1">
+                  {errors.age.message}
+                </p>
+              )}
             </div>
 
             <div>
@@ -269,37 +325,43 @@ export default function CompleteProfile({ user }) {
                   <select
                     {...field}
                     className={`w-full rounded-xl border p-3 bg-gray-50 text-gray-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 transition cursor-pointer ${
-                      errors.gender ? "border-red-500 focus:ring-red-400" : "border-gray-200"
+                      errors.gender
+                        ? "border-red-500 focus:ring-red-400"
+                        : "border-gray-200"
                     }`}
                   >
-                    <option value="" disabled>Género</option>
+                    <option value="" disabled>
+                      Género
+                    </option>
                     <option value="Hombre">Hombre</option>
                     <option value="Mujer">Mujer</option>
                     <option value="Otro">Otro</option>
                   </select>
                 )}
               />
-              {errors.gender && <p className="text-red-500 text-xs mt-1 ml-1">{errors.gender.message}</p>}
+              {errors.gender && (
+                <p className="text-red-500 text-xs mt-1 ml-1">
+                  {errors.gender.message}
+                </p>
+              )}
             </div>
           </div>
 
           {/* DESCRIPCIÓN */}
-          <div>
-            <Controller
-              control={control}
-              name="description"
-              render={({ field }) => (
-                <textarea
-                  {...field}
-                  rows="3"
-                  className="w-full rounded-xl border border-gray-200 p-3 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 transition resize-none"
-                  placeholder="Escribe una pequeña bio..."
-                />
-              )}
-            />
-          </div>
 
-          {/* BOTÓN SUBMIT */}
+          <Controller
+            control={control}
+            name="description"
+            render={({ field }) => (
+              <textarea
+                {...field}
+                rows="3"
+                className="w-full rounded-xl border border-gray-200 p-3 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 transition resize-none"
+                placeholder="Escribe una pequeña bio..."
+              />
+            )}
+          />
+
           <button
             type="submit"
             disabled={loading}
@@ -309,8 +371,8 @@ export default function CompleteProfile({ user }) {
           </button>
         </form>
 
-        <button 
-          onClick={logout} 
+        <button
+          onClick={logout}
           className="mt-4 text-sm font-semibold text-gray-400 w-full hover:text-gray-600 transition"
         >
           Cerrar sesión y salir
