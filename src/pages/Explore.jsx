@@ -103,16 +103,27 @@ export default function Explore({ user }) {
     };
   }, [mode, cursor]);
 
-  /* ---------- PRECARGA DE IMÁGENES ---------- */
+  /* ---------- PRECARGA DE IMÁGENES SEGURA ---------- */
 
   function preloadImages(list) {
-    const preloadCount = mode === 1 ? 10 : 6;
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(() => {
+        executePreload(list);
+      }, { timeout: 2000 });
+    } else {
+      setTimeout(() => executePreload(list), 1000);
+    }
+  }
 
+  function executePreload(list) {
+    const preloadCount = mode === 1 ? 6 : 4;
+    
+    // Solo limitamos la cantidad y forzamos resolución móvil (width=320 o width=400)
+    // para reducir el estrangulamiento de la red Android Chrome IO.
     list.slice(0, preloadCount).forEach((p) => {
       if (!p.photo) return;
-
       const img = new Image();
-      img.src = `${p.photo}?width=500&quality=70`;
+      img.src = `${p.photo}?width=400&quality=60`;
     });
   }
 
