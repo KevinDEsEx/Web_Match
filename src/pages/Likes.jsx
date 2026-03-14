@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "../services/supabase";
 import UserCard from "../components/UserCard";
 import SearchFilterBar from "../components/SearchFilterBar";
@@ -8,29 +8,26 @@ const RENDER_LIMIT = 40;
 
 export default function Likes({ user }) {
   const [profiles, setProfiles] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [likes, setLikes] = useState(new Set());
   const [mode, setMode] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [genderFilter, setGenderFilter] = useState("");
 
-  /* ---------- FILTROS OPTIMIZADOS ---------- */
+  const filteredProfiles = profiles.filter((p) => {
+    const matchSearch = p.name
+      ?.toLowerCase()
+      .includes(searchQuery.toLowerCase());
 
-  const filteredProfiles = useMemo(() => {
-    return profiles.filter((p) => {
-      const matchSearch = p.name
-        ?.toLowerCase()
-        .includes(searchQuery.toLowerCase());
+    const matchGender = genderFilter ? p.gender === genderFilter : true;
 
-      const matchGender = genderFilter ? p.gender === genderFilter : true;
-
-      return matchSearch && matchGender;
-    });
-  }, [profiles, searchQuery, genderFilter]);
+    return matchSearch && matchGender;
+  });
 
   const visibleProfiles = filteredProfiles.slice(0, RENDER_LIMIT);
 
-  /* ---------- CACHE + CARGA INICIAL ---------- */
+  /* ---------- CACHE ---------- */
 
   useEffect(() => {
     const cached = sessionStorage.getItem(CACHE_KEY);
@@ -38,28 +35,20 @@ export default function Likes({ user }) {
     if (cached) {
       setProfiles(JSON.parse(cached));
       setLoading(false);
-    } else {
-      loadLikes();
-    }
-  }, []);
-
-  /* ---------- ESCUCHAR CAMBIOS DE LIKES ---------- */
-
-  useEffect(() => {
-    function reload() {
-      loadLikes();
     }
 
-    window.addEventListener("likesUpdated", reload);
-
-    return () => window.removeEventListener("likesUpdated", reload);
+    loadLikes();
   }, []);
 
-  /* ---------- ESCUCHAR CAMBIO DE MODO ---------- */
+  /* ---------- CAMBIO DE MODO ---------- */
 
   useEffect(() => {
     function handleMode(e) {
-      setMode(e.detail);
+      if (e.detail === 2) {
+        setMode(0);
+      } else {
+        setMode(e.detail);
+      }
     }
 
     window.addEventListener("changeMode", handleMode);
@@ -67,86 +56,101 @@ export default function Likes({ user }) {
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
+  /* ---------- ESCUCHAR ACTUALIZACIÓN GLOBAL ---------- */
+
+  useEffect(() => {
+    function handleLikesUpdate() {
+      loadLikes();
+    }
+
+    window.addEventListener("likesUpdated", handleLikesUpdate);
+
+    return () => window.removeEventListener("likesUpdated", handleLikesUpdate);
+  }, []);
+
   /* ---------- CARGAR LIKES ---------- */
 
   async function loadLikes() {
-    setLoading(true);
-
-    const { data, error } = await supabase
+    const { data: likeRows } = await supabase
       .from("likes")
-      .select(
-        `
-        to_user,
-        users:to_user (*)
-      `,
-      )
+      .select("to_user")
       .eq("from_user", user.id);
 
-    if (error || !data) {
+    if (!likeRows) {
       setProfiles([]);
+      setLikes(new Set());
       setLoading(false);
       return;
     }
 
-    const users = data.map((l) => l.users).filter(Boolean);
+    const likedIds = likeRows.map((l) => l.to_user);
 
-    /* eliminar duplicados */
+    setLikes(new Set(likedIds));
 
-    const uniqueMap = new Map();
-    users.forEach((u) => uniqueMap.set(u.id, u));
+    if (likedIds.length === 0) {
+      setProfiles([]);
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify([]));
+      setLoading(false);
+      return;
+    }
 
-    const uniqueUsers = Array.from(uniqueMap.values());
+    const { data: users } = await supabase
+      .from("users")
+      .select("*")
+      .in("id", likedIds);
 
-    setProfiles(uniqueUsers);
-
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(uniqueUsers));
+    if (users) {
+      setProfiles(users);
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify(users));
+    }
 
     setLoading(false);
   }
 
-  /* ---------- QUITAR LIKE ---------- */
+  /* ---------- LIKE / UNLIKE ---------- */
 
   async function toggleLike(id) {
-    await supabase
-      .from("likes")
-      .delete()
-      .eq("from_user", user.id)
-      .eq("to_user", id);
+    const liked = likes.has(id);
 
-    const updated = profiles.filter((u) => u.id !== id);
+    if (liked) {
+      await supabase
+        .from("likes")
+        .delete()
+        .eq("from_user", user.id)
+        .eq("to_user", id);
+    } else {
+      await supabase
+        .from("likes")
+        .upsert(
+          { from_user: user.id, to_user: id },
+          { onConflict: "from_user,to_user" },
+        );
+    }
 
-    setProfiles(updated);
-
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(updated));
+    await loadLikes();
 
     window.dispatchEvent(new Event("likesUpdated"));
-  }
-
-  /* ---------- LOADER ---------- */
-
-  if (loading) {
-    return (
-      <div className="flex justify-center mt-20">
-        <div className="w-14 h-14 border-4 border-pink-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
   }
 
   /* ---------- UI ---------- */
 
   return (
     <div className="min-h-screen pb-28 bg-gray-50 border-t">
-      {profiles.length === 0 && (
+      {loading ? (
+        <div className="flex justify-center mt-20">
+          <div className="w-14 h-14 border-4 border-pink-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      ) : profiles.length === 0 ? (
         <div className="text-center mt-20 text-gray-500">
-          <p className="text-lg font-semibold">Aún no has marcado intereses</p>
+          <p className="text-lg font-semibold">No has dado likes aún</p>
 
           <p className="text-sm mt-2">
-            Explora perfiles y toca dos veces para guardar tus favoritos ❤️
+            Los perfiles que te gusten aparecerán aquí ❤️
           </p>
         </div>
-      )}
+      ) : null}
 
-      {profiles.length > 0 && (
+      {!loading && profiles.length > 0 && (
         <SearchFilterBar
           search={searchQuery}
           setSearch={setSearchQuery}
@@ -155,22 +159,39 @@ export default function Likes({ user }) {
         />
       )}
 
-      <div
-        className={`p-3 gap-3 grid ${
-          mode === 1 ? "grid-cols-2" : "grid-cols-1"
-        }`}
-      >
-        {visibleProfiles.map((p) => (
-          <UserCard
-            key={p.id}
-            user={p}
-            liked={true}
-            onLike={toggleLike}
-            grid={mode === 1}
-            isMe={false}
-          />
-        ))}
-      </div>
+      {/* ---------- MODO TARJETA GRANDE ---------- */}
+
+      {!loading && mode === 0 && (
+        <div className="grid grid-cols-1 gap-4 p-3">
+          {visibleProfiles.map((p) => (
+            <UserCard
+              key={p.id}
+              user={p}
+              liked={likes.has(p.id)}
+              onLike={toggleLike}
+              grid={false}
+              isMe={false}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* ---------- MODO GRID ---------- */}
+
+      {!loading && mode === 1 && (
+        <div className="grid grid-cols-2 gap-3 p-3">
+          {visibleProfiles.map((p) => (
+            <UserCard
+              key={p.id}
+              user={p}
+              liked={likes.has(p.id)}
+              onLike={toggleLike}
+              grid={true}
+              isMe={false}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

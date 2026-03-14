@@ -9,6 +9,7 @@ const RENDER_LIMIT = 40;
 
 export default function Matches({ user }) {
   const [profiles, setProfiles] = useState([]);
+  const [likes, setLikes] = useState(new Set());
   const [mode, setMode] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -38,6 +39,7 @@ export default function Matches({ user }) {
     }
 
     loadMatches();
+    loadLikes();
   }, []);
 
   /* ---------- ESCUCHAR CAMBIO DE MODO ---------- */
@@ -61,9 +63,22 @@ export default function Matches({ user }) {
   useEffect(() => {
     const interval = setInterval(() => {
       loadMatches();
-    }, 10000); // cada 10s
+    }, 10000);
 
     return () => clearInterval(interval);
+  }, []);
+
+  /* ---------- ESCUCHAR CAMBIO DE LIKES ---------- */
+
+  useEffect(() => {
+    function handleLikesUpdate() {
+      loadMatches();
+      loadLikes();
+    }
+
+    window.addEventListener("likesUpdated", handleLikesUpdate);
+
+    return () => window.removeEventListener("likesUpdated", handleLikesUpdate);
   }, []);
 
   /* ---------- CARGAR MATCHES ---------- */
@@ -86,8 +101,6 @@ export default function Matches({ user }) {
       return;
     }
 
-    /* eliminar duplicados por seguridad */
-
     const uniqueMap = new Map();
 
     data.forEach((u) => {
@@ -101,6 +114,45 @@ export default function Matches({ user }) {
     sessionStorage.setItem(CACHE_KEY, JSON.stringify(uniqueUsers));
 
     setLoading(false);
+  }
+
+  /* ---------- CARGAR LIKES ---------- */
+
+  async function loadLikes() {
+    const { data } = await supabase
+      .from("likes")
+      .select("to_user")
+      .eq("from_user", user.id);
+
+    if (data) {
+      setLikes(new Set(data.map((l) => l.to_user)));
+    }
+  }
+
+  /* ---------- LIKE / UNLIKE ---------- */
+
+  async function toggleLike(id) {
+    const liked = likes.has(id);
+
+    if (liked) {
+      await supabase
+        .from("likes")
+        .delete()
+        .eq("from_user", user.id)
+        .eq("to_user", id);
+    } else {
+      await supabase
+        .from("likes")
+        .upsert(
+          { from_user: user.id, to_user: id },
+          { onConflict: "from_user,to_user" },
+        );
+    }
+
+    await loadLikes();
+    await loadMatches();
+
+    window.dispatchEvent(new Event("likesUpdated"));
   }
 
   /* ---------- ABRIR WHATSAPP ---------- */
@@ -157,8 +209,8 @@ export default function Matches({ user }) {
               <div className="w-full">
                 <UserCard
                   user={p}
-                  liked={true}
-                  onLike={() => {}}
+                  liked={likes.has(p.id)}
+                  onLike={toggleLike}
                   grid={false}
                   isMe={false}
                 />
@@ -187,8 +239,8 @@ export default function Matches({ user }) {
               <div className="w-full">
                 <UserCard
                   user={p}
-                  liked={true}
-                  onLike={() => {}}
+                  liked={likes.has(p.id)}
+                  onLike={toggleLike}
                   grid={true}
                   isMe={false}
                 />
