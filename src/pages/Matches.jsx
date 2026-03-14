@@ -16,12 +16,18 @@ export default function Matches({ user }) {
   const [genderFilter, setGenderFilter] = useState("");
 
   const filteredProfiles = profiles.filter((p) => {
-    const matchSearch = p.name?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchSearch = p.name
+      ?.toLowerCase()
+      .includes(searchQuery.toLowerCase());
+
     const matchGender = genderFilter ? p.gender === genderFilter : true;
+
     return matchSearch && matchGender;
   });
 
   const visibleProfiles = filteredProfiles.slice(0, RENDER_LIMIT);
+
+  /* ---------- CARGAR CACHE ---------- */
 
   useEffect(() => {
     const cached = sessionStorage.getItem(CACHE_KEY);
@@ -29,12 +35,13 @@ export default function Matches({ user }) {
     if (cached) {
       setProfiles(JSON.parse(cached));
       setLoading(false);
-    } else {
-      loadMatches();
     }
+
+    loadMatches();
   }, []);
 
-  // escuchar cambio de modo
+  /* ---------- ESCUCHAR CAMBIO DE MODO ---------- */
+
   useEffect(() => {
     function handleMode(e) {
       if (e.detail === 2) {
@@ -49,76 +56,54 @@ export default function Matches({ user }) {
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
-  // realtime
-  useEffect(() => {
-    const channel = supabase
-      .channel("likes-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "likes",
-        },
-        () => {
-          loadMatches();
-        },
-      )
-      .subscribe();
+  /* ---------- REFRESH AUTOMÁTICO ---------- */
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadMatches();
+    }, 10000); // cada 10s
+
+    return () => clearInterval(interval);
   }, []);
 
+  /* ---------- CARGAR MATCHES ---------- */
+
   async function loadMatches() {
-    setLoading(true);
+    const { data, error } = await supabase.rpc("get_user_matches", {
+      p_user: user.id,
+    });
 
-    const { data: myLikes } = await supabase
-      .from("likes")
-      .select("to_user")
-      .eq("from_user", user.id);
+    if (error) {
+      console.error(error);
+      setLoading(false);
+      return;
+    }
 
-    if (!myLikes || myLikes.length === 0) {
+    if (!data) {
       setProfiles([]);
       sessionStorage.setItem(CACHE_KEY, JSON.stringify([]));
       setLoading(false);
       return;
     }
 
-    const ids = myLikes.map((l) => l.to_user);
-
-    const { data: mutualLikes } = await supabase
-      .from("likes")
-      .select("from_user")
-      .in("from_user", ids)
-      .eq("to_user", user.id);
-
-    const matchIds = mutualLikes?.map((l) => l.from_user) || [];
-
-    const { data: users } = await supabase
-      .from("users")
-      .select("*")
-      .in("id", matchIds); // Only fetch users who liked us back, further optimize fetching
-
-    if (!users) {
-      setLoading(false);
-      return;
-    }
+    /* eliminar duplicados por seguridad */
 
     const uniqueMap = new Map();
-    users.forEach((u) => uniqueMap.set(u.id, u));
+
+    data.forEach((u) => {
+      uniqueMap.set(u.id, u);
+    });
+
     const uniqueUsers = Array.from(uniqueMap.values());
 
-    const enriched = uniqueUsers.map((u) => ({
-      ...u,
-      matchActive: true, // we already filtered by matchIds in the supabase query
-    }));
+    setProfiles(uniqueUsers);
 
-    setProfiles(enriched);
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(enriched));
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify(uniqueUsers));
+
     setLoading(false);
   }
+
+  /* ---------- ABRIR WHATSAPP ---------- */
 
   function openWhatsapp(profile) {
     if (!profile.phone) {
@@ -129,12 +114,14 @@ export default function Matches({ user }) {
     const message =
       `Hola ${profile.name} 👋\n` +
       `Hicimos match en TENEX ❤️\n\n` +
-      `Quería saludarte y romper el hielo 😊`;
+      `Quería saludarte 😊`;
 
     const url = `https://wa.me/${profile.phone}?text=${encodeURIComponent(message)}`;
 
     window.open(url, "_blank");
   }
+
+  /* ---------- UI ---------- */
 
   return (
     <div className="min-h-screen pb-28 bg-gray-50 border-t">
@@ -147,25 +134,26 @@ export default function Matches({ user }) {
           <p className="text-lg font-semibold">Aún no tienes matches</p>
 
           <p className="text-sm mt-2">
-            Cuando dos personas se interesan mutuamente aparecerán aquí ❤️
+            Cuando dos personas se interesen mutuamente aparecerán aquí ❤️
           </p>
         </div>
       ) : null}
 
       {!loading && profiles.length > 0 && (
-        <SearchFilterBar 
-          search={searchQuery} 
-          setSearch={setSearchQuery} 
-          genderFilter={genderFilter} 
-          setGenderFilter={setGenderFilter} 
+        <SearchFilterBar
+          search={searchQuery}
+          setSearch={setSearchQuery}
+          genderFilter={genderFilter}
+          setGenderFilter={setGenderFilter}
         />
       )}
+
+      {/* ---------- MODO TARJETA GRANDE ---------- */}
 
       {!loading && mode === 0 && (
         <div className="grid grid-cols-1 gap-6 p-3 max-w-md mx-auto">
           {visibleProfiles.map((p) => (
             <div key={p.id} className="flex flex-col items-center w-full">
-              {/* 🔥 FIX: w-full */}
               <div className="w-full">
                 <UserCard
                   user={p}
@@ -190,11 +178,12 @@ export default function Matches({ user }) {
         </div>
       )}
 
+      {/* ---------- MODO GRID ---------- */}
+
       {!loading && mode === 1 && (
         <div className="grid grid-cols-2 gap-4 p-3 max-w-md mx-auto">
           {visibleProfiles.map((p) => (
             <div key={p.id} className="flex flex-col items-center w-full">
-              {/* 🔥 FIX */}
               <div className="w-full">
                 <UserCard
                   user={p}
@@ -211,9 +200,7 @@ export default function Matches({ user }) {
                 rounded-lg bg-green-500 text-white text-sm
                 shadow hover:scale-105 active:scale-95 transition"
               >
-                <span className="material-symbols-outlined text-sm">
-                  chat
-                </span>
+                <span className="material-symbols-outlined text-sm">chat</span>
                 WhatsApp
               </button>
             </div>
