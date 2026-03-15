@@ -13,24 +13,31 @@ export default function Matches({ user }) {
   const [mode, setMode] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  // Variable para saber si los likes ya se cargaron por primera vez
+  const [likesLoaded, setLikesLoaded] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState("");
   const [genderFilter, setGenderFilter] = useState("");
 
-  // Usamos ref para que las funciones del canal realtime siempre
-  // lean el user.id más reciente sin crear closures stale.
   const userIdRef = useRef(user?.id);
   useEffect(() => {
     userIdRef.current = user?.id;
   }, [user?.id]);
 
+  // Filtramos proactivamente por búsqueda, género Y LIKES.
+  // Esto asegura que si quitas un like, la persona desaparece INSTANTÁNEAMENTE
+  // aunque la base de datos tarde un segundo en borrar el match.
   const filteredProfiles = profiles.filter((p) => {
     const matchSearch = p.name
       ?.toLowerCase()
       .includes(searchQuery.toLowerCase());
 
     const matchGender = genderFilter ? p.gender === genderFilter : true;
+    
+    // Solo filtramos por likes si ya terminamos de cargarlos (para evitar lista vacía al inicio)
+    const stillLiked = !likesLoaded || likes.has(p.id);
 
-    return matchSearch && matchGender;
+    return matchSearch && matchGender && stillLiked;
   });
 
   const visibleProfiles = filteredProfiles.slice(0, RENDER_LIMIT);
@@ -38,17 +45,20 @@ export default function Matches({ user }) {
   /* ---------- INICIO ---------- */
 
   useEffect(() => {
-    // Cargar caché inmediatamente para mostrar algo mientras llegan los datos
     const cached = sessionStorage.getItem(CACHE_KEY);
     if (cached) {
       setProfiles(JSON.parse(cached));
       setLoading(false);
     }
 
-    // Carga en paralelo: likes y matches de forma independiente
-    loadLikes();
-    loadMatches();
+    initData();
   }, []);
+
+  async function initData() {
+    // Cargamos likes primero para tener el filtro listo
+    await loadLikes();
+    await loadMatches();
+  }
 
   /* ---------- CAMBIO DE MODO ---------- */
 
@@ -60,37 +70,44 @@ export default function Matches({ user }) {
         setMode(e.detail);
       }
     }
-
     window.addEventListener("changeMode", handleMode);
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
-  /* ---------- REALTIME (tabla matches) ---------- */
+  /* ---------- REALTIME (matches y likes) ---------- */
 
   useEffect(() => {
     const channel = supabase
-      .channel("matches-realtime-v2")
+      .channel("matches-realtime-v3")
+      // Escuchar cambios en MATCHES
       .on(
         "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "matches",
-        },
+        { event: "*", schema: "public", table: "matches" },
         (payload) => {
           const { new: newRow, old: oldRow } = payload;
           const uid = userIdRef.current;
           const affected =
-            newRow?.user1 === uid ||
-            newRow?.user2 === uid ||
-            oldRow?.user1 === uid ||
-            oldRow?.user2 === uid;
+            newRow?.user1 === uid || newRow?.user2 === uid ||
+            oldRow?.user1 === uid || oldRow?.user2 === uid;
+
+          if (affected) {
+            loadMatches();
+          }
+        }
+      )
+      // Escuchar cambios en LIKES (muy importante para unlikes propios)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "likes" },
+        (payload) => {
+          const { new: newRow, old: oldRow } = payload;
+          const uid = userIdRef.current;
+          const affected = newRow?.from_user === uid || oldRow?.from_user === uid;
 
           if (affected) {
             loadLikes();
-            loadMatches();
           }
-        },
+        }
       )
       .subscribe();
 
@@ -99,14 +116,13 @@ export default function Matches({ user }) {
     };
   }, []);
 
-  /* ---------- ESCUCHAR CAMBIO GLOBAL (likesUpdated) ---------- */
+  /* ---------- ESCUCHAR LIKES UPDATED GLOBAL ---------- */
 
   useEffect(() => {
     function handleLikesUpdate() {
       loadLikes();
       loadMatches();
     }
-
     window.addEventListener("likesUpdated", handleLikesUpdate);
     return () => window.removeEventListener("likesUpdated", handleLikesUpdate);
   }, []);
@@ -121,6 +137,7 @@ export default function Matches({ user }) {
 
     if (data) {
       setLikes(new Set(data.map((l) => l.to_user)));
+      setLikesLoaded(true);
     }
   }
 
@@ -139,27 +156,30 @@ export default function Matches({ user }) {
       return;
     }
 
-    // El RPC ya devuelve solo los usuarios con los que hay match mutuo.
-    // NO filtramos por `likes` aquí para evitar el race condition de estado stale.
     const matchUsers = data ?? [];
 
-    // Eliminar duplicados por id (defensa extra)
+    // Eliminar duplicados
     const uniqueMap = new Map();
     matchUsers.forEach((u) => uniqueMap.set(u.id, u));
     const uniqueUsers = Array.from(uniqueMap.values());
 
     setProfiles(uniqueUsers);
     sessionStorage.setItem(CACHE_KEY, JSON.stringify(uniqueUsers));
-
     setLoading(false);
   }
 
   /* ---------- LIKE / UNLIKE ---------- */
 
   async function toggleLike(id) {
-    const liked = likes.has(id);
+    const isLiked = likes.has(id);
 
-    if (liked) {
+    // OPTIMISTIC UI: Si estamos quitando el like, borrarlo del estado inmediatamente
+    if (isLiked) {
+      const newLikes = new Set(likes);
+      newLikes.delete(id);
+      setLikes(newLikes);
+      
+      // Llamada a API en segundo plano
       await supabase
         .from("likes")
         .delete()
@@ -170,13 +190,13 @@ export default function Matches({ user }) {
         .from("likes")
         .upsert(
           { from_user: user.id, to_user: id },
-          { onConflict: "from_user,to_user" },
+          { onConflict: "from_user,to_user" }
         );
+      
+      await loadLikes();
     }
 
-    await loadLikes();
     await loadMatches();
-
     window.dispatchEvent(new Event("likesUpdated"));
   }
 
@@ -201,27 +221,19 @@ export default function Matches({ user }) {
 
   return (
     <div className="min-h-screen pb-28 bg-gray-50 border-t">
-
-      {/* Estado de carga */}
-      {loading && (
+      {loading && profiles.length === 0 && (
         <div className="flex justify-center mt-20">
           <div className="w-14 h-14 border-4 border-pink-500 border-t-transparent rounded-full animate-spin" />
         </div>
       )}
 
-      {/* Sin matches: fijo en pantalla, no hace scroll */}
-      {!loading && profiles.length === 0 && (
+      {!loading && filteredProfiles.length === 0 && (
         <div
           style={{
             position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
+            top: 0, left: 0, right: 0, bottom: 0,
+            display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center",
             pointerEvents: "none",
           }}
         >
@@ -234,7 +246,6 @@ export default function Matches({ user }) {
         </div>
       )}
 
-      {/* Barra de búsqueda */}
       {!loading && profiles.length > 0 && (
         <SearchFilterBar
           search={searchQuery}
@@ -244,7 +255,6 @@ export default function Matches({ user }) {
         />
       )}
 
-      {/* Vista lista */}
       {!loading && mode === 0 && (
         <div className="grid grid-cols-1 gap-6 p-3 max-w-md mx-auto">
           {visibleProfiles.map((p) => (
@@ -271,7 +281,6 @@ export default function Matches({ user }) {
         </div>
       )}
 
-      {/* Vista grid */}
       {!loading && mode === 1 && (
         <div className="grid grid-cols-2 gap-4 p-3 max-w-md mx-auto">
           {visibleProfiles.map((p) => (
