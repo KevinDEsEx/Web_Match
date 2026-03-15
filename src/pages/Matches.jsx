@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../services/supabase";
 import UserCard from "../components/UserCard";
 import { toast } from "react-toastify";
@@ -16,6 +16,13 @@ export default function Matches({ user }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [genderFilter, setGenderFilter] = useState("");
 
+  // Usamos ref para que las funciones del canal realtime siempre
+  // lean el user.id más reciente sin crear closures stale.
+  const userIdRef = useRef(user?.id);
+  useEffect(() => {
+    userIdRef.current = user?.id;
+  }, [user?.id]);
+
   const filteredProfiles = profiles.filter((p) => {
     const matchSearch = p.name
       ?.toLowerCase()
@@ -28,18 +35,19 @@ export default function Matches({ user }) {
 
   const visibleProfiles = filteredProfiles.slice(0, RENDER_LIMIT);
 
-  /* ---------- CACHE ---------- */
+  /* ---------- INICIO ---------- */
 
   useEffect(() => {
+    // Cargar caché inmediatamente para mostrar algo mientras llegan los datos
     const cached = sessionStorage.getItem(CACHE_KEY);
-
     if (cached) {
       setProfiles(JSON.parse(cached));
       setLoading(false);
     }
 
-    loadMatches();
+    // Carga en paralelo: likes y matches de forma independiente
     loadLikes();
+    loadMatches();
   }, []);
 
   /* ---------- CAMBIO DE MODO ---------- */
@@ -54,30 +62,29 @@ export default function Matches({ user }) {
     }
 
     window.addEventListener("changeMode", handleMode);
-
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
-  /* ---------- REALTIME ---------- */
+  /* ---------- REALTIME (tabla matches) ---------- */
 
   useEffect(() => {
     const channel = supabase
-      .channel("matches-realtime")
+      .channel("matches-realtime-v2")
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
-          table: "likes",
+          table: "matches",
         },
         (payload) => {
-          // Solo recargar si el cambio nos afecta
           const { new: newRow, old: oldRow } = payload;
+          const uid = userIdRef.current;
           const affected =
-            newRow?.from_user === user.id ||
-            newRow?.to_user === user.id ||
-            oldRow?.from_user === user.id ||
-            oldRow?.to_user === user.id;
+            newRow?.user1 === uid ||
+            newRow?.user2 === uid ||
+            oldRow?.user1 === uid ||
+            oldRow?.user2 === uid;
 
           if (affected) {
             loadLikes();
@@ -92,7 +99,7 @@ export default function Matches({ user }) {
     };
   }, []);
 
-  /* ---------- ESCUCHAR CAMBIO GLOBAL ---------- */
+  /* ---------- ESCUCHAR CAMBIO GLOBAL (likesUpdated) ---------- */
 
   useEffect(() => {
     function handleLikesUpdate() {
@@ -101,7 +108,6 @@ export default function Matches({ user }) {
     }
 
     window.addEventListener("likesUpdated", handleLikesUpdate);
-
     return () => window.removeEventListener("likesUpdated", handleLikesUpdate);
   }, []);
 
@@ -128,32 +134,21 @@ export default function Matches({ user }) {
     });
 
     if (error) {
-      console.error(error);
+      console.error("Error cargando matches:", error);
       setLoading(false);
       return;
     }
 
-    if (!data || data.length === 0) {
-      setProfiles([]);
-      sessionStorage.setItem(CACHE_KEY, JSON.stringify([]));
-      setLoading(false);
-      return;
-    }
+    // El RPC ya devuelve solo los usuarios con los que hay match mutuo.
+    // NO filtramos por `likes` aquí para evitar el race condition de estado stale.
+    const matchUsers = data ?? [];
 
-    /* FILTRAR SOLO MATCHES REALES */
-
-    const validMatches = data.filter((p) => likes.has(p.id));
-
+    // Eliminar duplicados por id (defensa extra)
     const uniqueMap = new Map();
-
-    validMatches.forEach((u) => {
-      uniqueMap.set(u.id, u);
-    });
-
+    matchUsers.forEach((u) => uniqueMap.set(u.id, u));
     const uniqueUsers = Array.from(uniqueMap.values());
 
     setProfiles(uniqueUsers);
-
     sessionStorage.setItem(CACHE_KEY, JSON.stringify(uniqueUsers));
 
     setLoading(false);
@@ -199,7 +194,6 @@ export default function Matches({ user }) {
       `Quería saludarte 😊`;
 
     const url = `https://wa.me/${profile.phone}?text=${encodeURIComponent(message)}`;
-
     window.open(url, "_blank");
   }
 
@@ -207,19 +201,40 @@ export default function Matches({ user }) {
 
   return (
     <div className="min-h-screen pb-28 bg-gray-50 border-t">
-      {loading ? (
+
+      {/* Estado de carga */}
+      {loading && (
         <div className="flex justify-center mt-20">
           <div className="w-14 h-14 border-4 border-pink-500 border-t-transparent rounded-full animate-spin" />
         </div>
-      ) : profiles.length === 0 ? (
-        <div className="text-center mt-20 text-gray-500">
-          <p className="text-lg font-semibold">Aún no tienes matches</p>
-          <p className="text-sm mt-2">
+      )}
+
+      {/* Sin matches: fijo en pantalla, no hace scroll */}
+      {!loading && profiles.length === 0 && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            pointerEvents: "none",
+          }}
+        >
+          <p className="text-lg font-semibold text-gray-600">
+            Aún no tienes matches
+          </p>
+          <p className="text-sm mt-2 text-gray-400 text-center px-6">
             Cuando dos personas se interesen mutuamente aparecerán aquí ❤️
           </p>
         </div>
-      ) : null}
+      )}
 
+      {/* Barra de búsqueda */}
       {!loading && profiles.length > 0 && (
         <SearchFilterBar
           search={searchQuery}
@@ -229,6 +244,7 @@ export default function Matches({ user }) {
         />
       )}
 
+      {/* Vista lista */}
       {!loading && mode === 0 && (
         <div className="grid grid-cols-1 gap-6 p-3 max-w-md mx-auto">
           {visibleProfiles.map((p) => (
@@ -255,6 +271,7 @@ export default function Matches({ user }) {
         </div>
       )}
 
+      {/* Vista grid */}
       {!loading && mode === 1 && (
         <div className="grid grid-cols-2 gap-4 p-3 max-w-md mx-auto">
           {visibleProfiles.map((p) => (

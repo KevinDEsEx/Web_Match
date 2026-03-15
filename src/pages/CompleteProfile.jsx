@@ -1,11 +1,18 @@
 import { useState } from "react";
 import { supabase } from "../services/supabase";
-import { useNavigate } from "react-router-dom";
 import imageCompression from "browser-image-compression";
 import { toast } from "react-toastify";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+
+/* ---------- VALORES POR DEFECTO ---------- */
+const DEFAULT_DESCRIPTION =
+  "Descúbreme en TENEX ✨ quizás tengamos más en común de lo que imaginas.";
+
+// Avatar genérico estable (no caduca como el de Google)
+const DEFAULT_AVATAR =
+  "https://ui-avatars.com/api/?background=f472b6&color=fff&size=200&name=";
 
 const formSchema = z.object({
   name: z
@@ -35,38 +42,35 @@ const COUNTRY_PREFIXES = [
 ];
 
 export default function CompleteProfile({ user, onProfileSaved }) {
-  const navigate = useNavigate();
-
   const [photoFile, setPhotoFile] = useState(null);
-  const [photoUrlPreview, setPhotoUrlPreview] = useState(
-    user?.user_metadata?.avatar_url || "",
-  );
+
+  // Prioridad: foto de Google (si existe y no es placeholder) → sin foto (se usará el avatar generado)
+  const googleAvatar = user?.user_metadata?.avatar_url || "";
+  const [photoUrlPreview, setPhotoUrlPreview] = useState(googleAvatar);
 
   const [prefix, setPrefix] = useState("+53");
   const [loading, setLoading] = useState(false);
 
-  let initialAge = "";
-  if (user?.user_metadata?.age) {
-    initialAge = parseInt(user.user_metadata.age);
-  }
-
   const {
     control,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      name: user?.user_metadata?.name || "",
+      name: user?.user_metadata?.full_name || user?.user_metadata?.name || "",
       phone: "",
-      age: initialAge,
+      age: "",
       gender: "",
       description: "",
     },
   });
 
-  /* CONTROL FOTO */
+  // Para generar el avatar por defecto con el nombre si no hay foto
+  const watchedName = watch("name");
 
+  /* ---------- CONTROL FOTO ---------- */
   async function handleFileSelect(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -77,22 +81,21 @@ export default function CompleteProfile({ user, onProfileSaved }) {
         maxWidthOrHeight: 800,
         useWebWorker: true,
       });
-
       setPhotoFile(compressed);
       setPhotoUrlPreview(URL.createObjectURL(compressed));
-    } catch (err) {
+    } catch {
       toast.error("Error al procesar la imagen.");
     }
   }
 
-  /* GUARDAR PERFIL */
-
+  /* ---------- GUARDAR PERFIL ---------- */
   async function onSubmit(data) {
     setLoading(true);
 
-    let finalPhotoUrl = photoUrlPreview;
-
     try {
+      let finalPhotoUrl = photoUrlPreview;
+
+      // Si se eligió un archivo nuevo → subir a Supabase Storage
       if (photoFile) {
         const fileName = `${user.id}-${Date.now()}.jpg`;
 
@@ -116,49 +119,56 @@ export default function CompleteProfile({ user, onProfileSaved }) {
         finalPhotoUrl = bgData.publicUrl;
       }
 
+      // Si no hay ninguna foto → usar avatar generativo con el nombre
+      if (!finalPhotoUrl) {
+        const nameEncoded = encodeURIComponent(
+          data.name?.slice(0, 2).toUpperCase() || "U"
+        );
+        finalPhotoUrl = `${DEFAULT_AVATAR}${nameEncoded}`;
+      }
+
       const unspacedPhone = data.phone.replace(/\s+/g, "");
       const fullPhone = prefix + unspacedPhone;
 
       const { error } = await supabase.from("users").upsert({
         id: user.id,
-        name: data.name,
+        name: data.name.trim(),
         phone: fullPhone,
         gender: data.gender,
         age: data.age,
-        description:
-          data.description ||
-          "Descúbreme en TENET ✨ quizás tengamos más en común de lo que imaginas.",
+        description: data.description?.trim() || DEFAULT_DESCRIPTION,
         photo: finalPhotoUrl,
       });
 
       if (error) {
-        toast.error("Error al guardar el perfil en la base de datos.");
+        console.error("Supabase upsert error:", error);
+        toast.error("Error al guardar el perfil. Intenta de nuevo.");
         setLoading(false);
         return;
       }
 
       toast.success("¡Perfil completado con éxito!");
 
-      /* Actualizar estado global si existe */
+      // Avisamos a App.jsx que recargue el perfil.
+      // App.jsx detectará que `profile` ya existe y redirigirá solo a /explore.
+      // NO llamamos navigate() aquí para evitar la race condition.
       if (onProfileSaved) {
         await onProfileSaved();
       } else {
-        /* fallback universal */
         window.dispatchEvent(new Event("profileUpdated"));
       }
-
-      navigate("/explore", { replace: true });
     } catch (err) {
-      toast.error("Error inesperado.");
+      console.error("Error inesperado:", err);
+      toast.error("Error inesperado. Intenta de nuevo.");
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   async function logout() {
     await supabase.auth.signOut();
   }
 
+  /* ---------- PANTALLA DE CARGA ---------- */
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-pink-500 p-6 px-4 text-center animate-pulse">
@@ -168,19 +178,19 @@ export default function CompleteProfile({ user, onProfileSaved }) {
           </span>
         </div>
         <h2 className="text-3xl font-extrabold text-white mb-2 tracking-wide">
-          Entrando a TENET...
+          Entrando a TENEX...
         </h2>
         <p className="text-pink-100 font-medium text-lg">
           Preparando tus mejores matches
         </p>
-
         <div className="w-64 h-2 bg-pink-400 rounded-full mt-10 overflow-hidden relative">
-          <div className="absolute top-0 left-0 h-full bg-white rounded-full animate-[progress_2s_ease-in-out_infinite]"></div>
+          <div className="absolute top-0 left-0 h-full bg-white rounded-full animate-[progress_2s_ease-in-out_infinite]" />
         </div>
       </div>
     );
   }
 
+  /* ---------- FORMULARIO ---------- */
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100 p-6 relative">
       <div className="bg-white shadow-xl rounded-2xl p-8 w-full max-w-md">
@@ -188,16 +198,19 @@ export default function CompleteProfile({ user, onProfileSaved }) {
           Sobre ti
         </h2>
 
-        {/* FOTO */}
-
+        {/* FOTO (opcional) */}
         <div className="flex flex-col items-center mb-6 relative">
           <div className="relative">
             <img
-              src={photoUrlPreview || "/default-avatar.png"}
+              src={
+                photoUrlPreview ||
+                `${DEFAULT_AVATAR}${encodeURIComponent(
+                  watchedName?.slice(0, 2).toUpperCase() || "U"
+                )}`
+              }
               alt="Avatar"
               className="w-32 h-32 rounded-full object-cover border-4 border-pink-100 shadow-sm bg-gray-50"
             />
-
             <label className="absolute bottom-0 right-0 bg-pink-500 hover:bg-pink-600 text-white p-2 rounded-full cursor-pointer shadow-lg transition transform hover:scale-105">
               <span className="material-symbols-outlined text-[20px]">
                 photo_camera
@@ -210,11 +223,11 @@ export default function CompleteProfile({ user, onProfileSaved }) {
               />
             </label>
           </div>
+          <p className="text-xs text-gray-400 mt-2">Foto opcional</p>
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           {/* NOMBRE */}
-
           <div>
             <Controller
               control={control}
@@ -241,7 +254,6 @@ export default function CompleteProfile({ user, onProfileSaved }) {
           </div>
 
           {/* TELEFONO */}
-
           <div>
             <div className="flex gap-2">
               <select
@@ -281,7 +293,6 @@ export default function CompleteProfile({ user, onProfileSaved }) {
                 />
               </div>
             </div>
-
             {errors.phone && (
               <p className="text-red-500 text-xs mt-1 ml-1">
                 {errors.phone.message}
@@ -289,8 +300,7 @@ export default function CompleteProfile({ user, onProfileSaved }) {
             )}
           </div>
 
-          {/* EDAD Y GENERO */}
-
+          {/* EDAD Y GÉNERO */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Controller
@@ -347,25 +357,26 @@ export default function CompleteProfile({ user, onProfileSaved }) {
             </div>
           </div>
 
-          {/* DESCRIPCIÓN */}
-
-          <Controller
-            control={control}
-            name="description"
-            render={({ field }) => (
-              <textarea
-                {...field}
-                rows="3"
-                className="w-full rounded-xl border border-gray-200 p-3 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 transition resize-none"
-                placeholder="Escribe una pequeña bio..."
-              />
-            )}
-          />
+          {/* DESCRIPCIÓN (opcional) */}
+          <div>
+            <Controller
+              control={control}
+              name="description"
+              render={({ field }) => (
+                <textarea
+                  {...field}
+                  rows="3"
+                  className="w-full rounded-xl border border-gray-200 p-3 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-pink-400 transition resize-none"
+                  placeholder="Escribe una pequeña bio... (opcional)"
+                />
+              )}
+            />
+          </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full mt-2 p-3.5 rounded-xl font-bold text-white bg-pink-500 hover:bg-pink-600 transition shadow-md active:scale-[0.98]"
+            className="w-full mt-2 p-3.5 rounded-xl font-bold text-white bg-pink-500 hover:bg-pink-600 transition shadow-md active:scale-[0.98] disabled:opacity-60"
           >
             Comenzar a explorar
           </button>

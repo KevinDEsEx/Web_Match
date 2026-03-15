@@ -3,12 +3,11 @@ import { supabase } from "../services/supabase";
 import UserCard from "../components/UserCard";
 import SwipeCard from "../components/SwipeCard";
 import SearchFilterBar from "../components/SearchFilterBar";
+import MatchModal from "../components/MatchModal";
 
 const PAGE_SIZE = 12;
 const CACHE_KEY = "explore_profiles";
 const MAX_CACHE = 120;
-
-/* NUEVO: límite de renderizado */
 const RENDER_LIMIT = 40;
 
 export default function Explore({ user }) {
@@ -18,6 +17,7 @@ export default function Explore({ user }) {
   const [mode, setMode] = useState(0);
   const [swipeIndex, setSwipeIndex] = useState(0);
   const [cursor, setCursor] = useState(null);
+  const [matchedUser, setMatchedUser] = useState(null); // para el modal de match
 
   const [searchQuery, setSearchQuery] = useState("");
   const [genderFilter, setGenderFilter] = useState("");
@@ -25,7 +25,7 @@ export default function Explore({ user }) {
   const loader = useRef(null);
   const loadingRef = useRef(false);
 
-  /* perfiles realmente filtrados y renderizados */
+  /* perfiles filtrados y renderizados */
   const filteredProfiles = profiles.filter((p) => {
     const matchSearch = p.name?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchGender = genderFilter ? p.gender === genderFilter : true;
@@ -34,29 +34,24 @@ export default function Explore({ user }) {
 
   const visibleProfiles = filteredProfiles.slice(0, RENDER_LIMIT);
 
-  /* ---------- FIX: RESET SWIPE INDEX EN BÚSQUEDA ---------- */
+  /* ---------- RESET SWIPE INDEX EN BÚSQUEDA ---------- */
   useEffect(() => {
     setSwipeIndex(0);
   }, [searchQuery, genderFilter]);
 
   /* ---------- CAMBIO DE MODO ---------- */
-
   useEffect(() => {
     function handleMode(e) {
       setMode(e.detail);
       setSwipeIndex(0);
     }
-
     window.addEventListener("changeMode", handleMode);
-
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
   /* ---------- CACHE ---------- */
-
   useEffect(() => {
     const cached = sessionStorage.getItem(CACHE_KEY);
-
     if (cached) {
       const parsed = JSON.parse(cached);
       setProfiles(parsed);
@@ -64,7 +59,6 @@ export default function Explore({ user }) {
   }, []);
 
   /* ---------- CARGAR LIKES ---------- */
-
   useEffect(() => {
     loadLikes();
   }, []);
@@ -80,8 +74,7 @@ export default function Explore({ user }) {
     }
   }
 
-  /* ---------- REALTIME ---------- */
-
+  /* ---------- REALTIME (likes propios para mantener el corazón actualizado) ---------- */
   useEffect(() => {
     const channel = supabase
       .channel("explore-likes-realtime")
@@ -107,7 +100,6 @@ export default function Explore({ user }) {
   }, []);
 
   /* ---------- SCROLL INFINITO ---------- */
-
   useEffect(() => {
     if (mode === 2) return;
 
@@ -121,7 +113,6 @@ export default function Explore({ user }) {
     );
 
     const current = loader.current;
-
     if (current) observer.observe(current);
 
     return () => {
@@ -129,13 +120,10 @@ export default function Explore({ user }) {
     };
   }, [mode, cursor]);
 
-  /* ---------- PRECARGA DE IMÁGENES SEGURA ---------- */
-
+  /* ---------- PRECARGA DE IMÁGENES ---------- */
   function preloadImages(list) {
     if ("requestIdleCallback" in window) {
-      window.requestIdleCallback(() => {
-        executePreload(list);
-      }, { timeout: 2000 });
+      window.requestIdleCallback(() => executePreload(list), { timeout: 2000 });
     } else {
       setTimeout(() => executePreload(list), 1000);
     }
@@ -143,9 +131,6 @@ export default function Explore({ user }) {
 
   function executePreload(list) {
     const preloadCount = mode === 1 ? 6 : 4;
-    
-    // Solo limitamos la cantidad y forzamos resolución móvil (width=320 o width=400)
-    // para reducir el estrangulamiento de la red Android Chrome IO.
     list.slice(0, preloadCount).forEach((p) => {
       if (!p.photo) return;
       const img = new Image();
@@ -154,7 +139,6 @@ export default function Explore({ user }) {
   }
 
   /* ---------- CARGAR PERFILES ---------- */
-
   async function loadProfiles() {
     if (loadingRef.current) return;
 
@@ -170,20 +154,14 @@ export default function Explore({ user }) {
     if (!error && data && data.length > 0) {
       setProfiles((prev) => {
         const merged = [...prev, ...data];
-
         const uniqueMap = new Map();
         merged.forEach((p) => uniqueMap.set(p.id, p));
         const unique = Array.from(uniqueMap.values());
-
         const trimmed = unique.slice(-MAX_CACHE);
-
         sessionStorage.setItem(CACHE_KEY, JSON.stringify(trimmed));
-
         preloadImages(unique);
-
         return trimmed;
       });
-
       setCursor(data[data.length - 1].created_at);
     }
 
@@ -196,7 +174,6 @@ export default function Explore({ user }) {
   }
 
   /* ---------- LIKE / UNLIKE ---------- */
-
   async function toggleLike(id) {
     const liked = likes.has(id);
 
@@ -209,7 +186,6 @@ export default function Explore({ user }) {
 
       const newLikes = new Set(likes);
       newLikes.delete(id);
-
       setLikes(newLikes);
     } else {
       await supabase
@@ -221,15 +197,25 @@ export default function Explore({ user }) {
 
       setLikes(new Set([...likes, id]));
 
-      const { data: match } = await supabase
+      // Comprobar si hay match mutuo y mostrar modal
+      const { data: mutualLike } = await supabase
         .from("likes")
-        .select("*")
+        .select("from_user")
         .eq("from_user", id)
         .eq("to_user", user.id)
         .maybeSingle();
 
-      if (match) {
-        console.log("MATCH!");
+      if (mutualLike) {
+        // Obtener perfil de la otra persona para el modal
+        const { data: otherProfile } = await supabase
+          .from("users")
+          .select("name, photo")
+          .eq("id", id)
+          .maybeSingle();
+
+        if (otherProfile) {
+          setMatchedUser(otherProfile);
+        }
       }
     }
 
@@ -237,7 +223,6 @@ export default function Explore({ user }) {
   }
 
   /* ---------- SWIPE ---------- */
-
   function handleSwipeLike(id) {
     toggleLike(id);
     setSwipeIndex((i) => i + 1);
@@ -248,15 +233,23 @@ export default function Explore({ user }) {
   }
 
   /* ---------- UI ---------- */
-
   return (
     <div className="min-h-screen pb-28 bg-gray-50 border-t">
+
+      {/* Modal de Match */}
+      {matchedUser && (
+        <MatchModal
+          user={matchedUser}
+          onClose={() => setMatchedUser(null)}
+        />
+      )}
+
       {mode !== 2 && (
-        <SearchFilterBar 
-          search={searchQuery} 
-          setSearch={setSearchQuery} 
-          genderFilter={genderFilter} 
-          setGenderFilter={setGenderFilter} 
+        <SearchFilterBar
+          search={searchQuery}
+          setSearch={setSearchQuery}
+          genderFilter={genderFilter}
+          setGenderFilter={setGenderFilter}
         />
       )}
 

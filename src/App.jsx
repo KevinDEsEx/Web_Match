@@ -1,5 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from "react";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "./services/supabase";
 import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
@@ -23,6 +23,7 @@ function App() {
   const [loadingProfile, setLoadingProfile] = useState(true);
 
   const location = useLocation();
+  const navigate = useNavigate();
 
   /* ---------- PREFETCH DE PÁGINAS ---------- */
 
@@ -101,6 +102,13 @@ function App() {
       .maybeSingle();
 
     setProfile(data);
+
+    // Navegar a Explore una vez que el perfil está en el estado global.
+    // Hacerlo aquí (en App) evita la race condition de hacer navigate()
+    // desde CompleteProfile antes de que React haya re-renderizado.
+    if (data) {
+      navigate("/explore", { replace: true });
+    }
   }
 
   /* ---------- LOADER GLOBAL ---------- */
