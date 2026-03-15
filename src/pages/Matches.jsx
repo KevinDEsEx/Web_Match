@@ -4,7 +4,8 @@ import UserCard from "../components/UserCard";
 import { toast } from "react-toastify";
 import SearchFilterBar from "../components/SearchFilterBar";
 
-const CACHE_KEY = "matches_profiles";
+const CACHE_KEY_PROFILES = "matches_profiles";
+const CACHE_KEY_LIKES = "matches_likes_set";
 const RENDER_LIMIT = 40;
 
 export default function Matches({ user }) {
@@ -12,8 +13,6 @@ export default function Matches({ user }) {
   const [likes, setLikes] = useState(new Set());
   const [mode, setMode] = useState(0);
   const [loading, setLoading] = useState(true);
-
-  // Variable para saber si los likes ya se cargaron por primera vez
   const [likesLoaded, setLikesLoaded] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -24,9 +23,7 @@ export default function Matches({ user }) {
     userIdRef.current = user?.id;
   }, [user?.id]);
 
-  // Filtramos proactivamente por búsqueda, género Y LIKES.
-  // Esto asegura que si quitas un like, la persona desaparece INSTANTÁNEAMENTE
-  // aunque la base de datos tarde un segundo en borrar el match.
+  // Filtro proactivo para evitar "matches fantasma" incluso con caché lento
   const filteredProfiles = profiles.filter((p) => {
     const matchSearch = p.name
       ?.toLowerCase()
@@ -34,7 +31,9 @@ export default function Matches({ user }) {
 
     const matchGender = genderFilter ? p.gender === genderFilter : true;
     
-    // Solo filtramos por likes si ya terminamos de cargarlos (para evitar lista vacía al inicio)
+    // Si ya cargamos los likes (de caché o DB), filtramos estrictamente.
+    // Si aún no hay nada de nada, mostramos para evitar parpadeo blanco total 
+    // pero usualmente el caché de likes lo resuelve.
     const stillLiked = !likesLoaded || likes.has(p.id);
 
     return matchSearch && matchGender && stillLiked;
@@ -45,66 +44,67 @@ export default function Matches({ user }) {
   /* ---------- INICIO ---------- */
 
   useEffect(() => {
-    const cached = sessionStorage.getItem(CACHE_KEY);
-    if (cached) {
-      setProfiles(JSON.parse(cached));
+    // 1. Intentar cargar TODO desde caché para evitar el parpadeo de 1 segundo
+    const cachedProfiles = sessionStorage.getItem(CACHE_KEY_PROFILES);
+    const cachedLikes = sessionStorage.getItem(CACHE_KEY_LIKES);
+
+    if (cachedProfiles) {
+      setProfiles(JSON.parse(cachedProfiles));
+    }
+    
+    if (cachedLikes) {
+      setLikes(new Set(JSON.parse(cachedLikes)));
+      setLikesLoaded(true);
+    }
+
+    if (cachedProfiles) {
       setLoading(false);
     }
 
+    // 2. Refrescar datos reales de la DB
     initData();
   }, []);
 
   async function initData() {
-    // Cargamos likes primero para tener el filtro listo
-    await loadLikes();
-    await loadMatches();
+    // Cargamos en paralelo
+    await Promise.all([loadLikes(), loadMatches()]);
   }
 
   /* ---------- CAMBIO DE MODO ---------- */
 
   useEffect(() => {
     function handleMode(e) {
-      if (e.detail === 2) {
-        setMode(0);
-      } else {
-        setMode(e.detail);
-      }
+      if (e.detail === 2) setMode(0);
+      else setMode(e.detail);
     }
     window.addEventListener("changeMode", handleMode);
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
-  /* ---------- REALTIME (matches y likes) ---------- */
+  /* ---------- REALTIME ---------- */
 
   useEffect(() => {
     const channel = supabase
-      .channel("matches-realtime-v3")
-      // Escuchar cambios en MATCHES
+      .channel("matches-realtime-v4")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "matches" },
         (payload) => {
           const { new: newRow, old: oldRow } = payload;
           const uid = userIdRef.current;
-          const affected =
-            newRow?.user1 === uid || newRow?.user2 === uid ||
-            oldRow?.user1 === uid || oldRow?.user2 === uid;
-
-          if (affected) {
+          if (newRow?.user1 === uid || newRow?.user2 === uid ||
+              oldRow?.user1 === uid || oldRow?.user2 === uid) {
             loadMatches();
           }
         }
       )
-      // Escuchar cambios en LIKES (muy importante para unlikes propios)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "likes" },
         (payload) => {
           const { new: newRow, old: oldRow } = payload;
           const uid = userIdRef.current;
-          const affected = newRow?.from_user === uid || oldRow?.from_user === uid;
-
-          if (affected) {
+          if (newRow?.from_user === uid || oldRow?.from_user === uid) {
             loadLikes();
           }
         }
@@ -136,15 +136,19 @@ export default function Matches({ user }) {
       .eq("from_user", user.id);
 
     if (data) {
-      setLikes(new Set(data.map((l) => l.to_user)));
+      const likesArray = data.map((l) => l.to_user);
+      setLikes(new Set(likesArray));
       setLikesLoaded(true);
+      // Guardar en caché para el próximo inicio
+      sessionStorage.setItem(CACHE_KEY_LIKES, JSON.stringify(likesArray));
     }
   }
 
   /* ---------- CARGAR MATCHES ---------- */
 
   async function loadMatches() {
-    setLoading(true);
+    // Si no tenemos perfiles aún, mostramos carga. Si ya hay (por caché), carga silenciosa.
+    if (profiles.length === 0) setLoading(true);
 
     const { data, error } = await supabase.rpc("get_user_matches", {
       p_user: user.id,
@@ -157,14 +161,12 @@ export default function Matches({ user }) {
     }
 
     const matchUsers = data ?? [];
-
-    // Eliminar duplicados
     const uniqueMap = new Map();
     matchUsers.forEach((u) => uniqueMap.set(u.id, u));
     const uniqueUsers = Array.from(uniqueMap.values());
 
     setProfiles(uniqueUsers);
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(uniqueUsers));
+    sessionStorage.setItem(CACHE_KEY_PROFILES, JSON.stringify(uniqueUsers));
     setLoading(false);
   }
 
@@ -173,13 +175,13 @@ export default function Matches({ user }) {
   async function toggleLike(id) {
     const isLiked = likes.has(id);
 
-    // OPTIMISTIC UI: Si estamos quitando el like, borrarlo del estado inmediatamente
     if (isLiked) {
+      // Optimistic UI
       const newLikes = new Set(likes);
       newLikes.delete(id);
       setLikes(newLikes);
+      sessionStorage.setItem(CACHE_KEY_LIKES, JSON.stringify(Array.from(newLikes)));
       
-      // Llamada a API en segundo plano
       await supabase
         .from("likes")
         .delete()
@@ -192,7 +194,6 @@ export default function Matches({ user }) {
           { from_user: user.id, to_user: id },
           { onConflict: "from_user,to_user" }
         );
-      
       await loadLikes();
     }
 
@@ -207,17 +208,10 @@ export default function Matches({ user }) {
       toast.warning("Este usuario no tiene teléfono registrado.");
       return;
     }
-
-    const message =
-      `Hola ${profile.name} 👋\n` +
-      `Hicimos match en TENEX ❤️\n\n` +
-      `Quería saludarte 😊`;
-
+    const message = `Hola ${profile.name} 👋\nHicimos match en TENEX ❤️\n\nQuería saludarte 😊`;
     const url = `https://wa.me/${profile.phone}?text=${encodeURIComponent(message)}`;
     window.open(url, "_blank");
   }
-
-  /* ---------- UI ---------- */
 
   return (
     <div className="min-h-screen pb-28 bg-gray-50 border-t">
@@ -237,16 +231,14 @@ export default function Matches({ user }) {
             pointerEvents: "none",
           }}
         >
-          <p className="text-lg font-semibold text-gray-600">
-            Aún no tienes matches
-          </p>
+          <p className="text-lg font-semibold text-gray-600">Aún no tienes matches</p>
           <p className="text-sm mt-2 text-gray-400 text-center px-6">
             Cuando dos personas se interesen mutuamente aparecerán aquí ❤️
           </p>
         </div>
       )}
 
-      {!loading && profiles.length > 0 && (
+      {(profiles.length > 0 || searchQuery || genderFilter) && (
         <SearchFilterBar
           search={searchQuery}
           setSearch={setSearchQuery}
@@ -255,9 +247,9 @@ export default function Matches({ user }) {
         />
       )}
 
-      {!loading && mode === 0 && (
+      {mode === 0 && (
         <div className="grid grid-cols-1 gap-6 p-3 max-w-md mx-auto">
-          {visibleProfiles.map((p) => (
+          {filteredProfiles.map((p) => (
             <div key={p.id} className="flex flex-col items-center w-full">
               <div className="w-full">
                 <UserCard
@@ -268,7 +260,6 @@ export default function Matches({ user }) {
                   isMe={false}
                 />
               </div>
-
               <button
                 onClick={() => openWhatsapp(p)}
                 className="mt-3 w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-green-500 text-white font-semibold shadow-lg hover:scale-105 active:scale-95 transition animate-pulse"
@@ -281,9 +272,9 @@ export default function Matches({ user }) {
         </div>
       )}
 
-      {!loading && mode === 1 && (
+      {mode === 1 && (
         <div className="grid grid-cols-2 gap-4 p-3 max-w-md mx-auto">
-          {visibleProfiles.map((p) => (
+          {filteredProfiles.map((p) => (
             <div key={p.id} className="flex flex-col items-center w-full">
               <div className="w-full">
                 <UserCard
@@ -294,7 +285,6 @@ export default function Matches({ user }) {
                   isMe={false}
                 />
               </div>
-
               <button
                 onClick={() => openWhatsapp(p)}
                 className="mt-2 w-full flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-green-500 text-white text-sm shadow hover:scale-105 active:scale-95 transition"
