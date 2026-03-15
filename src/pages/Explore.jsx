@@ -80,6 +80,32 @@ export default function Explore({ user }) {
     }
   }
 
+  /* ---------- REALTIME ---------- */
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("explore-likes-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "likes",
+        },
+        (payload) => {
+          const { new: newRow, old: oldRow } = payload;
+          if (newRow?.from_user === user.id || oldRow?.from_user === user.id) {
+            loadLikes();
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   /* ---------- SCROLL INFINITO ---------- */
 
   useEffect(() => {

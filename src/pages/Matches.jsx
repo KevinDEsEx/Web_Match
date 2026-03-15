@@ -58,14 +58,38 @@ export default function Matches({ user }) {
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
-  /* ---------- REFRESH ---------- */
+  /* ---------- REALTIME ---------- */
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      loadMatches();
-    }, 10000);
+    const channel = supabase
+      .channel("matches-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "likes",
+        },
+        (payload) => {
+          // Solo recargar si el cambio nos afecta
+          const { new: newRow, old: oldRow } = payload;
+          const affected =
+            newRow?.from_user === user.id ||
+            newRow?.to_user === user.id ||
+            oldRow?.from_user === user.id ||
+            oldRow?.to_user === user.id;
 
-    return () => clearInterval(interval);
+          if (affected) {
+            loadLikes();
+            loadMatches();
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   /* ---------- ESCUCHAR CAMBIO GLOBAL ---------- */

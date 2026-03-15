@@ -107,6 +107,32 @@ export default function Likes({ user }) {
     setLoading(false);
   }
 
+  /* ---------- REALTIME ---------- */
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("likes-page-realtime")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "likes",
+        },
+        (payload) => {
+          const { new: newRow, old: oldRow } = payload;
+          if (newRow?.from_user === user.id || oldRow?.from_user === user.id) {
+            loadLikes();
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   /* ---------- LIKE / UNLIKE ---------- */
 
   async function toggleLike(id) {
