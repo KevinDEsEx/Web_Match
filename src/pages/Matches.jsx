@@ -28,7 +28,7 @@ export default function Matches({ user }) {
 
   const visibleProfiles = filteredProfiles.slice(0, RENDER_LIMIT);
 
-  /* ---------- CARGAR CACHE ---------- */
+  /* ---------- CACHE ---------- */
 
   useEffect(() => {
     const cached = sessionStorage.getItem(CACHE_KEY);
@@ -42,7 +42,7 @@ export default function Matches({ user }) {
     loadLikes();
   }, []);
 
-  /* ---------- ESCUCHAR CAMBIO DE MODO ---------- */
+  /* ---------- CAMBIO DE MODO ---------- */
 
   useEffect(() => {
     function handleMode(e) {
@@ -58,7 +58,7 @@ export default function Matches({ user }) {
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
-  /* ---------- REFRESH AUTOMÁTICO ---------- */
+  /* ---------- REFRESH ---------- */
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -68,53 +68,18 @@ export default function Matches({ user }) {
     return () => clearInterval(interval);
   }, []);
 
-  /* ---------- ESCUCHAR CAMBIO DE LIKES ---------- */
+  /* ---------- ESCUCHAR CAMBIO GLOBAL ---------- */
 
   useEffect(() => {
     function handleLikesUpdate() {
-      loadMatches();
       loadLikes();
+      loadMatches();
     }
 
     window.addEventListener("likesUpdated", handleLikesUpdate);
 
     return () => window.removeEventListener("likesUpdated", handleLikesUpdate);
   }, []);
-
-  /* ---------- CARGAR MATCHES ---------- */
-
-  async function loadMatches() {
-    const { data, error } = await supabase.rpc("get_user_matches", {
-      p_user: user.id,
-    });
-
-    if (error) {
-      console.error(error);
-      setLoading(false);
-      return;
-    }
-
-    if (!data) {
-      setProfiles([]);
-      sessionStorage.setItem(CACHE_KEY, JSON.stringify([]));
-      setLoading(false);
-      return;
-    }
-
-    const uniqueMap = new Map();
-
-    data.forEach((u) => {
-      uniqueMap.set(u.id, u);
-    });
-
-    const uniqueUsers = Array.from(uniqueMap.values());
-
-    setProfiles(uniqueUsers);
-
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(uniqueUsers));
-
-    setLoading(false);
-  }
 
   /* ---------- CARGAR LIKES ---------- */
 
@@ -127,6 +92,47 @@ export default function Matches({ user }) {
     if (data) {
       setLikes(new Set(data.map((l) => l.to_user)));
     }
+  }
+
+  /* ---------- CARGAR MATCHES ---------- */
+
+  async function loadMatches() {
+    setLoading(true);
+
+    const { data, error } = await supabase.rpc("get_user_matches", {
+      p_user: user.id,
+    });
+
+    if (error) {
+      console.error(error);
+      setLoading(false);
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      setProfiles([]);
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify([]));
+      setLoading(false);
+      return;
+    }
+
+    /* FILTRAR SOLO MATCHES REALES */
+
+    const validMatches = data.filter((p) => likes.has(p.id));
+
+    const uniqueMap = new Map();
+
+    validMatches.forEach((u) => {
+      uniqueMap.set(u.id, u);
+    });
+
+    const uniqueUsers = Array.from(uniqueMap.values());
+
+    setProfiles(uniqueUsers);
+
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify(uniqueUsers));
+
+    setLoading(false);
   }
 
   /* ---------- LIKE / UNLIKE ---------- */
@@ -155,7 +161,7 @@ export default function Matches({ user }) {
     window.dispatchEvent(new Event("likesUpdated"));
   }
 
-  /* ---------- ABRIR WHATSAPP ---------- */
+  /* ---------- WHATSAPP ---------- */
 
   function openWhatsapp(profile) {
     if (!profile.phone) {
@@ -184,7 +190,6 @@ export default function Matches({ user }) {
       ) : profiles.length === 0 ? (
         <div className="text-center mt-20 text-gray-500">
           <p className="text-lg font-semibold">Aún no tienes matches</p>
-
           <p className="text-sm mt-2">
             Cuando dos personas se interesen mutuamente aparecerán aquí ❤️
           </p>
@@ -199,8 +204,6 @@ export default function Matches({ user }) {
           setGenderFilter={setGenderFilter}
         />
       )}
-
-      {/* ---------- MODO TARJETA GRANDE ---------- */}
 
       {!loading && mode === 0 && (
         <div className="grid grid-cols-1 gap-6 p-3 max-w-md mx-auto">
@@ -218,9 +221,7 @@ export default function Matches({ user }) {
 
               <button
                 onClick={() => openWhatsapp(p)}
-                className="mt-3 w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl 
-                bg-green-500 text-white font-semibold shadow-lg
-                hover:scale-105 active:scale-95 transition animate-pulse"
+                className="mt-3 w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-green-500 text-white font-semibold shadow-lg hover:scale-105 active:scale-95 transition animate-pulse"
               >
                 <span className="material-symbols-outlined">chat</span>
                 Enviar WhatsApp
@@ -229,8 +230,6 @@ export default function Matches({ user }) {
           ))}
         </div>
       )}
-
-      {/* ---------- MODO GRID ---------- */}
 
       {!loading && mode === 1 && (
         <div className="grid grid-cols-2 gap-4 p-3 max-w-md mx-auto">
@@ -248,9 +247,7 @@ export default function Matches({ user }) {
 
               <button
                 onClick={() => openWhatsapp(p)}
-                className="mt-2 w-full flex items-center justify-center gap-1 px-3 py-2
-                rounded-lg bg-green-500 text-white text-sm
-                shadow hover:scale-105 active:scale-95 transition"
+                className="mt-2 w-full flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-green-500 text-white text-sm shadow hover:scale-105 active:scale-95 transition"
               >
                 <span className="material-symbols-outlined text-sm">chat</span>
                 WhatsApp

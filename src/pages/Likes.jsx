@@ -56,7 +56,7 @@ export default function Likes({ user }) {
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
-  /* ---------- ESCUCHAR ACTUALIZACIÓN GLOBAL ---------- */
+  /* ---------- ESCUCHAR CAMBIOS DE OTRAS PÁGINAS ---------- */
 
   useEffect(() => {
     function handleLikesUpdate() {
@@ -118,6 +118,14 @@ export default function Likes({ user }) {
         .delete()
         .eq("from_user", user.id)
         .eq("to_user", id);
+
+      /* eliminar instantáneamente de la UI */
+
+      setProfiles((prev) => prev.filter((p) => p.id !== id));
+
+      const newLikes = new Set(likes);
+      newLikes.delete(id);
+      setLikes(newLikes);
     } else {
       await supabase
         .from("likes")
@@ -125,9 +133,9 @@ export default function Likes({ user }) {
           { from_user: user.id, to_user: id },
           { onConflict: "from_user,to_user" },
         );
-    }
 
-    await loadLikes();
+      await loadLikes();
+    }
 
     window.dispatchEvent(new Event("likesUpdated"));
   }
@@ -159,9 +167,7 @@ export default function Likes({ user }) {
         />
       )}
 
-      {/* ---------- MODO TARJETA GRANDE ---------- */}
-
-      {!loading && mode === 0 && (
+      {mode === 0 && (
         <div className="grid grid-cols-1 gap-4 p-3">
           {visibleProfiles.map((p) => (
             <UserCard
@@ -176,9 +182,7 @@ export default function Likes({ user }) {
         </div>
       )}
 
-      {/* ---------- MODO GRID ---------- */}
-
-      {!loading && mode === 1 && (
+      {mode === 1 && (
         <div className="grid grid-cols-2 gap-3 p-3">
           {visibleProfiles.map((p) => (
             <UserCard
