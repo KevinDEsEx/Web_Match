@@ -12,7 +12,7 @@ const DEFAULT_DESCRIPTION =
 
 // Avatar genérico estable (no caduca como el de Google)
 const DEFAULT_AVATAR =
-  "https://ui-avatars.com/api/?background=f472b6&color=fff&size=200&name=";
+  "https://ui-avatars.com/api/?background=f472b6&color=fff&size=120&name=";
 
 const formSchema = z.object({
   name: z
@@ -77,8 +77,10 @@ export default function CompleteProfile({ user, onProfileSaved }) {
 
     try {
       const compressed = await imageCompression(file, {
-        maxSizeMB: 0.3,
-        maxWidthOrHeight: 800,
+        maxSizeMB: 0.04,
+        maxWidthOrHeight: 320,
+        fileType: "image/webp",
+        initialQuality: 0.7,
         useWebWorker: true,
       });
       setPhotoFile(compressed);
@@ -102,7 +104,7 @@ export default function CompleteProfile({ user, onProfileSaved }) {
         const { error: uploadError } = await supabase.storage
           .from("avatars")
           .upload(fileName, photoFile, {
-            cacheControl: "3600",
+            cacheControl: "31536000",
             upsert: true,
           });
 

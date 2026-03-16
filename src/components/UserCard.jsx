@@ -72,6 +72,10 @@ export default function UserCard({ user, liked, onLike, grid, isMe }) {
           decoding="async"
           alt={user.name}
           onLoad={() => setLoaded(true)}
+          onError={(e) => {
+            e.target.src = `https://ui-avatars.com/api/?background=f472b6&color=fff&size=120&name=${encodeURIComponent((user.name || "U").slice(0, 2).toUpperCase())}`;
+            setLoaded(true);
+          }}
           className={`w-full h-full object-cover transition-opacity duration-500 ${
             loaded ? "opacity-100" : "opacity-0"
           }`}

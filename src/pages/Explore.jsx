@@ -8,7 +8,7 @@ import MatchModal from "../components/MatchModal";
 const PAGE_SIZE = 12;
 const CACHE_KEY = "explore_profiles";
 const MAX_CACHE = 120;
-const RENDER_LIMIT = 40;
+const RENDER_LIMIT = 20;
 
 export default function Explore({ user }) {
   const [profiles, setProfiles] = useState([]);
@@ -51,7 +51,7 @@ export default function Explore({ user }) {
 
   /* ---------- CACHE ---------- */
   useEffect(() => {
-    const cached = sessionStorage.getItem(CACHE_KEY);
+    const cached = localStorage.getItem(CACHE_KEY);
     if (cached) {
       const parsed = JSON.parse(cached);
       setProfiles(parsed);
@@ -74,30 +74,7 @@ export default function Explore({ user }) {
     }
   }
 
-  /* ---------- REALTIME (likes propios para mantener el corazón actualizado) ---------- */
-  useEffect(() => {
-    const channel = supabase
-      .channel("explore-likes-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "likes",
-        },
-        (payload) => {
-          const { new: newRow, old: oldRow } = payload;
-          if (newRow?.from_user === user.id || oldRow?.from_user === user.id) {
-            loadLikes();
-          }
-        },
-      )
-      .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
 
   /* ---------- SCROLL INFINITO ---------- */
   useEffect(() => {
@@ -158,7 +135,7 @@ export default function Explore({ user }) {
         merged.forEach((p) => uniqueMap.set(p.id, p));
         const unique = Array.from(uniqueMap.values());
         const trimmed = unique.slice(-MAX_CACHE);
-        sessionStorage.setItem(CACHE_KEY, JSON.stringify(trimmed));
+        localStorage.setItem(CACHE_KEY, JSON.stringify(trimmed));
         preloadImages(unique);
         return trimmed;
       });

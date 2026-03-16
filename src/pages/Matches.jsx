@@ -4,9 +4,9 @@ import UserCard from "../components/UserCard";
 import { toast } from "react-toastify";
 import SearchFilterBar from "../components/SearchFilterBar";
 
-const CACHE_KEY_PROFILES = "matches_profiles";
-const CACHE_KEY_LIKES = "matches_likes_set";
-const RENDER_LIMIT = 40;
+const CACHE_KEY_PROFILES = "matches_profiles_v2";
+const CACHE_KEY_LIKES = "matches_likes_set_v2";
+const RENDER_LIMIT = 20;
 
 export default function Matches({ user }) {
   const [profiles, setProfiles] = useState([]);
@@ -23,50 +23,53 @@ export default function Matches({ user }) {
     userIdRef.current = user?.id;
   }, [user?.id]);
 
-  // Filtro proactivo para evitar "matches fantasma" incluso con caché lento
+  /* 
+     FILTRO PROACTIVO (Strict Consistency):
+     Solo mostramos a alguien si:
+     1. Está en la lista de perfiles que el servidor dice que son match.
+     2. Nosotros (el cliente) aún tenemos el like activo hacia ellos. 
+     Esto evita ver "fantasmas" mientras el trigger del servidor termina de borrar la fila.
+  */
   const filteredProfiles = profiles.filter((p) => {
+    // Si ya cargamos likes (de caché o DB), validamos que persista el like.
+    // Si no han cargado aún, mostramos por defecto para evitar parpadeo.
+    const hasMyLike = !likesLoaded || likes.has(p.id);
+    if (!hasMyLike) return false;
+
     const matchSearch = p.name
       ?.toLowerCase()
       .includes(searchQuery.toLowerCase());
-
     const matchGender = genderFilter ? p.gender === genderFilter : true;
-    
-    // Si ya cargamos los likes (de caché o DB), filtramos estrictamente.
-    // Si aún no hay nada de nada, mostramos para evitar parpadeo blanco total 
-    // pero usualmente el caché de likes lo resuelve.
-    const stillLiked = !likesLoaded || likes.has(p.id);
 
-    return matchSearch && matchGender && stillLiked;
+    return matchSearch && matchGender;
   });
 
   const visibleProfiles = filteredProfiles.slice(0, RENDER_LIMIT);
 
-  /* ---------- INICIO ---------- */
+  /* ---------- INICIALIZACIÓN ---------- */
 
   useEffect(() => {
-    // 1. Intentar cargar TODO desde caché para evitar el parpadeo de 1 segundo
-    const cachedProfiles = sessionStorage.getItem(CACHE_KEY_PROFILES);
-    const cachedLikes = sessionStorage.getItem(CACHE_KEY_LIKES);
+    // 1. Cargar desde Caché (Cero parpadeo)
+    const cachedProfiles = localStorage.getItem(CACHE_KEY_PROFILES);
+    const cachedLikes = localStorage.getItem(CACHE_KEY_LIKES);
 
-    if (cachedProfiles) {
-      setProfiles(JSON.parse(cachedProfiles));
-    }
-    
     if (cachedLikes) {
-      setLikes(new Set(JSON.parse(cachedLikes)));
+      const parsedLikes = JSON.parse(cachedLikes);
+      setLikes(new Set(parsedLikes));
       setLikesLoaded(true);
     }
 
     if (cachedProfiles) {
+      setProfiles(JSON.parse(cachedProfiles));
       setLoading(false);
     }
 
-    // 2. Refrescar datos reales de la DB
-    initData();
+    // 2. Sincronizar con la DB
+    refreshAll();
   }, []);
 
-  async function initData() {
-    // Cargamos en paralelo
+  async function refreshAll() {
+    // Ejecutamos en paralelo para máxima velocidad
     await Promise.all([loadLikes(), loadMatches()]);
   }
 
@@ -81,33 +84,39 @@ export default function Matches({ user }) {
     return () => window.removeEventListener("changeMode", handleMode);
   }, []);
 
-  /* ---------- REALTIME ---------- */
+  /* ---------- REALTIME (Supabase) ---------- */
 
   useEffect(() => {
     const channel = supabase
-      .channel("matches-realtime-v4")
+      .channel("matches-sync-v5")
+      // Escuchar cambios en la tabla de MATCHES
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "matches" },
         (payload) => {
-          const { new: newRow, old: oldRow } = payload;
+          const { new: n, old: o } = payload;
           const uid = userIdRef.current;
-          if (newRow?.user1 === uid || newRow?.user2 === uid ||
-              oldRow?.user1 === uid || oldRow?.user2 === uid) {
+          if (
+            n?.user1 === uid ||
+            n?.user2 === uid ||
+            o?.user1 === uid ||
+            o?.user2 === uid
+          ) {
             loadMatches();
           }
-        }
+        },
       )
+      // Escuchar cambios en la tabla de LIKES (muy importante para unlikes externos o triggers)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "likes" },
         (payload) => {
-          const { new: newRow, old: oldRow } = payload;
+          const { new: n, old: o } = payload;
           const uid = userIdRef.current;
-          if (newRow?.from_user === uid || oldRow?.from_user === uid) {
+          if (n?.from_user === uid || o?.from_user === uid) {
             loadLikes();
           }
-        }
+        },
       )
       .subscribe();
 
@@ -116,15 +125,14 @@ export default function Matches({ user }) {
     };
   }, []);
 
-  /* ---------- ESCUCHAR LIKES UPDATED GLOBAL ---------- */
+  /* ---------- ESCUCHAR EVENTO GLOBAL ---------- */
 
   useEffect(() => {
-    function handleLikesUpdate() {
-      loadLikes();
-      loadMatches();
+    function handleUpdate() {
+      refreshAll();
     }
-    window.addEventListener("likesUpdated", handleLikesUpdate);
-    return () => window.removeEventListener("likesUpdated", handleLikesUpdate);
+    window.addEventListener("likesUpdated", handleUpdate);
+    return () => window.removeEventListener("likesUpdated", handleUpdate);
   }, []);
 
   /* ---------- CARGAR LIKES ---------- */
@@ -139,15 +147,14 @@ export default function Matches({ user }) {
       const likesArray = data.map((l) => l.to_user);
       setLikes(new Set(likesArray));
       setLikesLoaded(true);
-      // Guardar en caché para el próximo inicio
-      sessionStorage.setItem(CACHE_KEY_LIKES, JSON.stringify(likesArray));
+      localStorage.setItem(CACHE_KEY_LIKES, JSON.stringify(likesArray));
     }
   }
 
   /* ---------- CARGAR MATCHES ---------- */
 
   async function loadMatches() {
-    // Si no tenemos perfiles aún, mostramos carga. Si ya hay (por caché), carga silenciosa.
+    // Si no hay nada en pantalla (ni caché), mostramos spinner
     if (profiles.length === 0) setLoading(true);
 
     const { data, error } = await supabase.rpc("get_user_matches", {
@@ -155,48 +162,57 @@ export default function Matches({ user }) {
     });
 
     if (error) {
-      console.error("Error cargando matches:", error);
+      console.error("Error RPC Matches:", error);
       setLoading(false);
       return;
     }
 
-    const matchUsers = data ?? [];
-    const uniqueMap = new Map();
-    matchUsers.forEach((u) => uniqueMap.set(u.id, u));
-    const uniqueUsers = Array.from(uniqueMap.values());
+    const uniqueUsers = Array.from(
+      new Map((data || []).map((u) => [u.id, u])).values(),
+    );
 
     setProfiles(uniqueUsers);
-    sessionStorage.setItem(CACHE_KEY_PROFILES, JSON.stringify(uniqueUsers));
+    localStorage.setItem(CACHE_KEY_PROFILES, JSON.stringify(uniqueUsers));
     setLoading(false);
   }
 
   /* ---------- LIKE / UNLIKE ---------- */
 
   async function toggleLike(id) {
-    const isLiked = likes.has(id);
+    const isCurrentlyLiked = likes.has(id);
 
-    if (isLiked) {
-      // Optimistic UI
+    if (isCurrentlyLiked) {
+      // 1. Optimistic UI: El usuario desaparece INMEDIATAMENTE de la lista
       const newLikes = new Set(likes);
       newLikes.delete(id);
       setLikes(newLikes);
-      sessionStorage.setItem(CACHE_KEY_LIKES, JSON.stringify(Array.from(newLikes)));
-      
-      await supabase
+      localStorage.setItem(
+        CACHE_KEY_LIKES,
+        JSON.stringify(Array.from(newLikes)),
+      );
+
+      // 2. DB: Borramos el like. El trigger de la DB (post-SQL fix) borrará el match.
+      const { error } = await supabase
         .from("likes")
         .delete()
         .eq("from_user", user.id)
         .eq("to_user", id);
+
+      if (error) toast.error("Error al quitar like");
     } else {
-      await supabase
+      // Dando like de nuevo
+      const { error } = await supabase
         .from("likes")
         .upsert(
           { from_user: user.id, to_user: id },
-          { onConflict: "from_user,to_user" }
+          { onConflict: "from_user,to_user" },
         );
-      await loadLikes();
+
+      if (error) toast.error("Error al dar like");
+      else await loadLikes(); // Recargar para detectar el match
     }
 
+    // Refrescar matches de la DB
     await loadMatches();
     window.dispatchEvent(new Event("likesUpdated"));
   }
@@ -222,16 +238,10 @@ export default function Matches({ user }) {
       )}
 
       {!loading && filteredProfiles.length === 0 && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0, left: 0, right: 0, bottom: 0,
-            display: "flex", flexDirection: "column",
-            alignItems: "center", justifyContent: "center",
-            pointerEvents: "none",
-          }}
-        >
-          <p className="text-lg font-semibold text-gray-600">Aún no tienes matches</p>
+        <div className="fixed inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <p className="text-lg font-semibold text-gray-600">
+            Aún no tienes matches
+          </p>
           <p className="text-sm mt-2 text-gray-400 text-center px-6">
             Cuando dos personas se interesen mutuamente aparecerán aquí ❤️
           </p>
@@ -247,55 +257,32 @@ export default function Matches({ user }) {
         />
       )}
 
-      {mode === 0 && (
-        <div className="grid grid-cols-1 gap-6 p-3 max-w-md mx-auto">
-          {filteredProfiles.map((p) => (
-            <div key={p.id} className="flex flex-col items-center w-full">
-              <div className="w-full">
-                <UserCard
-                  user={p}
-                  liked={likes.has(p.id)}
-                  onLike={toggleLike}
-                  grid={false}
-                  isMe={false}
-                />
-              </div>
-              <button
-                onClick={() => openWhatsapp(p)}
-                className="mt-3 w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-green-500 text-white font-semibold shadow-lg hover:scale-105 active:scale-95 transition animate-pulse"
-              >
-                <span className="material-symbols-outlined">chat</span>
-                Enviar WhatsApp
-              </button>
+      {/* RENDER LIST O GRID USANDO filteredProfiles */}
+      <div
+        className={`p-3 max-w-md mx-auto grid gap-6 ${mode === 1 ? "grid-cols-2" : "grid-cols-1"}`}
+      >
+        {visibleProfiles.map((p) => (
+          <div key={p.id} className="flex flex-col items-center w-full">
+            <div className="w-full">
+              <UserCard
+                user={p}
+                liked={likes.has(p.id)}
+                onLike={toggleLike}
+                grid={mode === 1}
+                isMe={false}
+              />
             </div>
-          ))}
-        </div>
-      )}
-
-      {mode === 1 && (
-        <div className="grid grid-cols-2 gap-4 p-3 max-w-md mx-auto">
-          {filteredProfiles.map((p) => (
-            <div key={p.id} className="flex flex-col items-center w-full">
-              <div className="w-full">
-                <UserCard
-                  user={p}
-                  liked={likes.has(p.id)}
-                  onLike={toggleLike}
-                  grid={true}
-                  isMe={false}
-                />
-              </div>
-              <button
-                onClick={() => openWhatsapp(p)}
-                className="mt-2 w-full flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-green-500 text-white text-sm shadow hover:scale-105 active:scale-95 transition"
-              >
-                <span className="material-symbols-outlined text-sm">chat</span>
-                WhatsApp
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+            <button
+              onClick={() => openWhatsapp(p)}
+              className={`${mode === 1 ? "mt-2 py-2 px-3 text-sm rounded-lg" : "mt-3 py-3 px-6 rounded-xl animate-pulse"} 
+                w-full flex items-center justify-center gap-2 bg-green-500 text-white font-semibold shadow-lg hover:scale-105 active:scale-95 transition`}
+            >
+              <span className="material-symbols-outlined text-base">chat</span>
+              {mode === 1 ? "WhatsApp" : "Enviar WhatsApp"}
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

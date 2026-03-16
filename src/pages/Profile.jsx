@@ -115,8 +115,10 @@ export default function Profile({ user }) {
       setUploadingPhoto(true);
 
       const compressed = await imageCompression(file, {
-        maxSizeMB: 0.3,
-        maxWidthOrHeight: 800,
+        maxSizeMB: 0.04,
+        maxWidthOrHeight: 320,
+        fileType: "image/webp",
+        initialQuality: 0.7,
         useWebWorker: true,
       });
 
@@ -127,12 +129,12 @@ export default function Profile({ user }) {
         }
       }
 
-      const fileName = `${user.id}-${Date.now()}.jpg`;
+      const fileName = `${user.id}-${Date.now()}.webp`;
 
       const { error: uploadError } = await supabase.storage
         .from("avatars")
         .upload(fileName, compressed, {
-          cacheControl: "3600",
+          cacheControl: "31536000",
           upsert: true,
         });
 
@@ -277,7 +279,10 @@ export default function Profile({ user }) {
       <div className="flex flex-col items-center p-6 bg-white border-b mb-6">
         <div className="relative">
           <img
-            src={photoUrlPreview || "/default-avatar.png"}
+            src={
+              photoUrlPreview ||
+              `https://ui-avatars.com/api/?background=f472b6&color=fff&size=120&name=${encodeURIComponent((profile?.name || "U").slice(0, 2).toUpperCase())}`
+            }
             className="w-32 h-32 rounded-full object-cover border-4 border-white shadow-xl"
           />
 

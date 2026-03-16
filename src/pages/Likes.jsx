@@ -4,7 +4,7 @@ import UserCard from "../components/UserCard";
 import SearchFilterBar from "../components/SearchFilterBar";
 
 const CACHE_KEY = "likes_profiles";
-const RENDER_LIMIT = 40;
+const RENDER_LIMIT = 20;
 
 export default function Likes({ user }) {
   const [profiles, setProfiles] = useState([]);
@@ -30,7 +30,7 @@ export default function Likes({ user }) {
   /* ---------- CACHE ---------- */
 
   useEffect(() => {
-    const cached = sessionStorage.getItem(CACHE_KEY);
+    const cached = localStorage.getItem(CACHE_KEY);
 
     if (cached) {
       setProfiles(JSON.parse(cached));
@@ -89,49 +89,25 @@ export default function Likes({ user }) {
 
     if (likedIds.length === 0) {
       setProfiles([]);
-      sessionStorage.setItem(CACHE_KEY, JSON.stringify([]));
+      localStorage.setItem(CACHE_KEY, JSON.stringify([]));
       setLoading(false);
       return;
     }
 
     const { data: users } = await supabase
       .from("users")
-      .select("*")
+      .select("id,name,age,gender,photo,phone,description")
       .in("id", likedIds);
 
     if (users) {
       setProfiles(users);
-      sessionStorage.setItem(CACHE_KEY, JSON.stringify(users));
+      localStorage.setItem(CACHE_KEY, JSON.stringify(users));
     }
 
     setLoading(false);
   }
 
-  /* ---------- REALTIME ---------- */
 
-  useEffect(() => {
-    const channel = supabase
-      .channel("likes-page-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "likes",
-        },
-        (payload) => {
-          const { new: newRow, old: oldRow } = payload;
-          if (newRow?.from_user === user.id || oldRow?.from_user === user.id) {
-            loadLikes();
-          }
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
 
   /* ---------- LIKE / UNLIKE ---------- */
 
